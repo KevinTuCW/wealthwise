@@ -1,0 +1,42 @@
+[
+  {
+    "id": "600036-cmb-2024",
+    "text": "招商银行 600036 净息差 零售贷款 占比 ROE 14 行业领先 信用卡 不良率 零售转型 增持 评级 目标价",
+    "meta": {"symbol": "600036", "type": "equity_research", "lang": "zh"}
+  },
+  {
+    "id": "000858-wuliangye-2024",
+    "text": "五粮液 000858 高端白酒 需求 消费疲软 批价 下降 渠道库存 去库存 中性评级 PE 估值 安全边际",
+    "meta": {"symbol": "000858", "type": "equity_research", "lang": "zh"}
+  },
+  {
+    "id": "sp500-us-macro-2025",
+    "text": "美股 宏观 标普500 利率 估值 科技板块 AI 投资 汇率风险 人民币 美元 利差 汇兑损耗",
+    "meta": {"symbol": "SPX", "type": "macro_research", "lang": "zh"}
+  },
+  {
+    "id": "hs300-etf-outlook",
+    "text": "沪深300 ETF 市盈率 低估 国有企业 分红 A股 市值管理 外资 波动",
+    "meta": {"symbol": "000300", "type": "index_research", "lang": "zh"}
+  },
+  {
+    "id": "gold-commodity-2025",
+    "text": "黄金 配置 避险资产 ETF 518880 央行 增持 地缘政治 不确定性 低相关性 组合分散 5% 10%",
+    "meta": {"symbol": "GOLD", "type": "commodity_research", "lang": "zh"}
+  },
+  {
+    "id": "bond-duration-risk",
+    "text": "债券 久期风险 长久期 利率 敏感 利率上行 BP 债券价格 下跌 利率反转 中短久期",
+    "meta": {"symbol": "BOND", "type": "fixed_income_research", "lang": "zh"}
+  },
+  {
+    "id": "fund-performance-attribution",
+    "text": "主动权益基金 业绩归因 沪深300 超额收益 衰减 费率成本 管理费 托管费 复利 指数基金 性价比",
+    "meta": {"symbol": "FUND", "type": "fund_research", "lang": "zh"}
+  },
+  {
+    "id": "reits-infrastructure-2025",
+    "text": "基础设施 REITs 高速公路 产业园区 仓储物流 分红率 通胀保护 固收 中低风险 债券替代 配置",
+    "meta": {"symbol": "REITS", "type": "reits_research", "lang": "zh"}
+  }
+]

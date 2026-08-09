@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     siliconflow_base_url: str = "https://api.siliconflow.com/v1"
     crosscheck_model: str = "deepseek-ai/DeepSeek-V3"    # cross-lab judge, distinct from GLM
 
+    # --- embeddings ---
+    embed_provider: str = "local"            # "local" (offline hashing) | "siliconflow"
+    embed_model: str = "Qwen/Qwen3-Embedding-8B"
+    embed_dim: int = 256
+
     # --- data providers ---
     use_real_providers: bool = False          # offline sample stack unless keys + this are set
     sample_data_dir: str = "data/samples"

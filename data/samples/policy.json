@@ -1,0 +1,42 @@
+[
+  {
+    "id": "suitability-match",
+    "text": "适当性 匹配 原则 金融机构 向 投资者 推介 产品 前 须 评估 投资者 风险承受能力 投资目标 财务状况 确保 产品 风险等级 相匹配 向 保守型 投资者 销售 高风险 产品 属于 违规行为",
+    "meta": {"category": "suitability", "lang": "zh"}
+  },
+  {
+    "id": "risk-disclosure",
+    "text": "风险揭示 要求 金融机构 必须 购买 产品前 书面 充分披露 主要风险 市场风险 流动性风险 信用风险 本金损失风险 投资者 须 签字 确认 已阅读 理解 风险揭示书",
+    "meta": {"category": "risk_disclosure", "lang": "zh"}
+  },
+  {
+    "id": "no-guaranteed-return",
+    "text": "不得 承诺 收益 固定回报 保本 监管规定 金融机构 从业人员 不得 以任何形式 向 投资者 承诺 固定收益 保证 本金 不受损失 违者 依法 承担 法律责任",
+    "meta": {"category": "prohibited_conduct", "lang": "zh"}
+  },
+  {
+    "id": "fx-cross-border-risk",
+    "text": "跨境投资 汇率风险 通道风险 外汇 汇率波动 实际收益 低于预期 亏损 跨境资金通道 各国监管政策 资金冻结 无法汇回",
+    "meta": {"category": "cross_border", "lang": "zh"}
+  },
+  {
+    "id": "investor-classification",
+    "text": "投资者 分类 管理 普通投资者 专业投资者 复杂产品 保护 适当性义务 信息披露 要求",
+    "meta": {"category": "investor_classification", "lang": "zh"}
+  },
+  {
+    "id": "cooling-off-period",
+    "text": "冷静期 制度 高风险 复杂 金融产品 普通投资者 24小时 冷静期 撤回 购买申请 不得 收取 费用",
+    "meta": {"category": "investor_protection", "lang": "zh"}
+  },
+  {
+    "id": "leverage-risk",
+    "text": "杠杆 融资融券 结构化产品 放大 亏损风险 损失 超过 初始本金 强制平仓 追加保证金 要求",
+    "meta": {"category": "leverage", "lang": "zh"}
+  },
+  {
+    "id": "liquidity-risk",
+    "text": "流动性风险 金融产品 低流动性 封闭式基金 私募产品 非标准化 债权资产 无法按预期价格变现 持有期",
+    "meta": {"category": "liquidity", "lang": "zh"}
+  }
+]
