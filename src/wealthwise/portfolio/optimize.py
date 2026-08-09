@@ -42,10 +42,6 @@ DEFAULT_HORIZON_YEARS: float = 3.0
 RISK_FREE_RATE: float = 0.02
 
 
-def _r_order(r_level: str) -> int:
-    return R_ORDER.get(r_level, 1)
-
-
 def build_portfolio(
     candidates: list[AssetCandidate],
     goal_constraints: dict,
@@ -85,10 +81,13 @@ def build_portfolio(
     PortfolioAllocation
         A fully populated allocation object.
     """
-    ceiling_order = _r_order(risk_ceiling)
+    if method != "risk_parity":
+        raise NotImplementedError(f"unknown method: {method}")
+
+    ceiling_order = R_ORDER.get(risk_ceiling, 1)
 
     # Step 1: filter by risk ceiling
-    eligible = [c for c in candidates if _r_order(c.r_level) <= ceiling_order]
+    eligible = [c for c in candidates if R_ORDER.get(c.r_level, 1) <= ceiling_order]
 
     if not eligible:
         # Edge case: nothing eligible — return empty allocation
@@ -156,6 +155,8 @@ def build_portfolio(
     mdd = max_drawdown_estimate(p_vol, DEFAULT_HORIZON_YEARS)
     sr = sharpe(DEFAULT_EXP_RETURN, p_vol, RISK_FREE_RATE)
 
+    # Compute actual cash+bond weight achieved to record liquidity compliance honestly
+    liquidity_achieved = class_weights.get("cash", 0.0) + class_weights.get("bond", 0.0)
     metrics = {
         "volatility": p_vol,
         "sharpe": sr,
@@ -163,6 +164,9 @@ def build_portfolio(
         "diversification_ratio": dr,
         "assumed_cross_corr": ASSUMED_CROSS_CORR,
         "n_assets": n,
+        "liquidity_target": liquidity_floor,
+        "liquidity_achieved": liquidity_achieved,
+        "constraints_met": liquidity_achieved >= liquidity_floor - 1e-9,
     }
 
     return PortfolioAllocation(

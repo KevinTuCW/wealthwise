@@ -115,7 +115,8 @@ def check_suitability(
     candidates:
         Full candidate list used to look up per-asset metadata (r_level,
         market).  Assets with weight > 0 in portfolio.weights that are not
-        found in candidates default to R1/A-market (conservative assumption).
+        found in candidates default to R5/A-market (fail closed: unknown
+        ratings treated as highest risk R5).
 
     Returns
     -------
@@ -142,7 +143,7 @@ def check_suitability(
     for symbol, weight in portfolio.weights.items():
         if weight <= 0:
             continue
-        r = symbol_r.get(symbol, "R1")  # conservative default
+        r = symbol_r.get(symbol, "R5")  # fail closed: unknown ratings treated as highest risk R5
         if is_over_level(r, c_level):
             asset_over_level_found = True
             violations.append(

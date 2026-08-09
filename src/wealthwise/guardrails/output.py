@@ -155,6 +155,21 @@ def enforce_output(state: AdvisoryState) -> AdvisoryState:
         updates["notes"] = notes
         updates["status"] = STATUS_NEEDS_REVIEW
 
+    # --- 1b. Compliance decision gate: REJECT/DOWNGRADE must never issue ---
+    if (
+        state.compliance is not None
+        and state.compliance.decision in {"REJECT", "DOWNGRADE"}
+        and "status" not in updates
+    ):
+        notes = [
+            *state.notes,
+            f"output guardrail: compliance decision is "
+            f"{state.compliance.decision!r} — advisory must not be issued; "
+            f"flagging for human review",
+        ]
+        updates["notes"] = notes
+        updates["status"] = STATUS_NEEDS_REVIEW
+
     # --- 2. Disclosure completeness (only for issuing states) --------------
     if state.status in _ISSUING_STATUSES and "status" not in updates:
         ok, missing = has_complete_disclosures(state)

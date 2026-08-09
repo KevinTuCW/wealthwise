@@ -190,3 +190,49 @@ def test_build_excludes_over_ceiling():
     assert alloc.weights.get("Risky", 0.0) == 0.0
     # Safe asset should carry the full weight
     assert abs(alloc.weights.get("Safe", 0.0) - 1.0) < 1e-6
+
+
+# ---------------------------------------------------------------------------
+# test_max_drawdown_estimate (I3)
+# ---------------------------------------------------------------------------
+
+def test_max_drawdown_estimate():
+    """vol=0.2, horizon=4 → 2*0.2*sqrt(4) = 0.8; and horizon=-1 must not raise."""
+    from wealthwise.portfolio.metrics import max_drawdown_estimate
+    result = max_drawdown_estimate(0.2, 4.0)
+    assert abs(result - 0.8) < 1e-9, f"Expected 0.8, got {result}"
+    # Negative horizon must not raise and must return 0.0
+    result_neg = max_drawdown_estimate(0.2, -1.0)
+    assert result_neg == 0.0, f"Expected 0.0 for negative horizon, got {result_neg}"
+
+
+# ---------------------------------------------------------------------------
+# test_records_liquidity_shortfall (I2)
+# ---------------------------------------------------------------------------
+
+def test_records_liquidity_shortfall():
+    """When liquidity_min can't be met (no bond/cash candidates), metrics must
+    honestly record constraints_met=False and liquidity_achieved < liquidity_target."""
+    # All-equity candidates; no bond or cash → liquidity floor can never be met
+    candidates = [
+        _make_candidate("EQ1", "R2", asset_class="equity", vol=0.2),
+        _make_candidate("EQ2", "R3", asset_class="equity", vol=0.25),
+    ]
+    goal_constraints = {"liquidity_min": 0.40}  # 40% floor — impossible with pure equity
+    alloc = build_portfolio(candidates, goal_constraints, risk_ceiling="R5")
+    assert "liquidity_target" in alloc.metrics
+    assert "liquidity_achieved" in alloc.metrics
+    assert "constraints_met" in alloc.metrics
+    assert alloc.metrics["constraints_met"] is False
+    assert alloc.metrics["liquidity_achieved"] < alloc.metrics["liquidity_target"]
+
+
+# ---------------------------------------------------------------------------
+# test_unknown_method_raises (M2)
+# ---------------------------------------------------------------------------
+
+def test_unknown_method_raises():
+    """build_portfolio with an unknown method must raise NotImplementedError."""
+    candidates = [_make_candidate("E1", "R2", vol=0.2)]
+    with pytest.raises(NotImplementedError):
+        build_portfolio(candidates, {}, risk_ceiling="R5", method="unknown_algo")

@@ -394,3 +394,23 @@ class TestEnforceOutput:
         )
         result = enforce_output(state)
         assert result.status == "NEEDS_HUMAN_REVIEW"
+
+    def test_reject_compliance_triggers_review(self):
+        """compliance.decision=REJECT with complete disclosures must force NEEDS_HUMAN_REVIEW."""
+        state = _advisory_done(compliance=_compliance("REJECT"))
+        result = enforce_output(state)
+        assert result.status == "NEEDS_HUMAN_REVIEW"
+        assert any("REJECT" in n or "review" in n.lower() for n in result.notes)
+
+    def test_downgrade_compliance_triggers_review(self):
+        """compliance.decision=DOWNGRADE with complete disclosures must force NEEDS_HUMAN_REVIEW."""
+        state = _advisory_done(compliance=_compliance("DOWNGRADE"))
+        result = enforce_output(state)
+        assert result.status == "NEEDS_HUMAN_REVIEW"
+        assert any("DOWNGRADE" in n or "review" in n.lower() for n in result.notes)
+
+    def test_pass_compliance_complete_disclosures_unchanged(self):
+        """compliance.decision=PASS with complete disclosures must pass through as 'done'."""
+        state = _advisory_done(compliance=_compliance("PASS"))
+        result = enforce_output(state)
+        assert result.status == "done"

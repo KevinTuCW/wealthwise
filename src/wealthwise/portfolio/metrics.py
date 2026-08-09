@@ -107,13 +107,17 @@ def max_drawdown_estimate(vol: float, horizon_years: float) -> float:
     vol:
         Annualized portfolio volatility (e.g. 0.15 for 15%).
     horizon_years:
-        Investment horizon in years.
+        Investment horizon in years. Must be ≥ 0; negative values are
+        clamped to 0 (returns 0.0) so math.sqrt never receives a negative
+        input.
 
     Returns
     -------
     float
         Estimated maximum drawdown fraction (0..∞, typically < 1).
     """
+    if horizon_years < 0:
+        horizon_years = 0.0
     return 2.0 * vol * math.sqrt(horizon_years)
 
 

@@ -269,3 +269,26 @@ def test_is_over_level():
     assert is_over_level("R1", "C2") is False   # below: not over-level
     assert is_over_level("R5", "C4") is True    # 5 > 4
     assert is_over_level("R5", "C5") is False   # max C allows max R
+
+
+def test_absent_symbol_treated_as_high_risk():
+    """A symbol held in the portfolio but absent from candidates must be treated
+    as R5 (fail-closed), so a C2 investor is flagged for a violation."""
+    profile = _profile(risk_level="C2")
+    # UNKNOWN_SYM is NOT in the candidates list
+    candidates = [
+        _candidate("KNOWN", "R1", asset_class="bond"),
+    ]
+    portfolio = _portfolio(
+        weights={"KNOWN": 0.5, "UNKNOWN_SYM": 0.5},
+        class_weights={"equity": 0.5, "bond": 0.5},
+        portfolio_r_level="R5",
+    )
+    verdict = check_suitability(profile, portfolio, candidates)
+    # With fail-closed default of R5, UNKNOWN_SYM exceeds C2 → must be flagged
+    assert verdict.matched is False, (
+        "UNKNOWN_SYM absent from candidates should default to R5 and trigger a violation"
+    )
+    assert any("UNKNOWN_SYM" in v for v in verdict.violations), (
+        f"Expected UNKNOWN_SYM in violations, got: {verdict.violations}"
+    )
