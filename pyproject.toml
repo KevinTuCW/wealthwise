@@ -1,0 +1,29 @@
+[project]
+name = "wealthwise"
+version = "0.1.0"
+description = "Personal asset-allocation advisory multi-agent — Supervisor + expert group, China investor-suitability guardrails (阵03)"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.29",
+  "pydantic>=2.6",
+  "pydantic-settings>=2.2",
+  "httpx[socks]>=0.27",
+]
+
+[project.scripts]
+wealthwise-eval = "wealthwise.eval:main"
+wealthwise-langfuse-check = "wealthwise.langfuse_check:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+llm = ["openai>=1.30", "langfuse>=4.14", "langgraph>=0.2"]
+data = ["akshare>=1.13"]
+pg = ["psycopg[binary]>=3.1", "pgvector>=0.2"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
