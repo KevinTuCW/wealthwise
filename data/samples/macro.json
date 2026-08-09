@@ -1,0 +1,20 @@
+{
+  "interest_rate": 0.034,
+  "cpi": 0.021,
+  "ppi": -0.008,
+  "gdp_growth_yoy": 0.049,
+  "m2_growth_yoy": 0.082,
+  "asset_class_view": {
+    "equity": "neutral",
+    "bond": "overweight",
+    "cash": "underweight",
+    "alt": "neutral"
+  },
+  "market_view": {
+    "A": "neutral",
+    "HK": "slight_overweight",
+    "US": "neutral"
+  },
+  "risk_sentiment": "cautious",
+  "as_of": "2026-08-01"
+}

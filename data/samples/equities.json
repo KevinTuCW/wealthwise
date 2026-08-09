@@ -1,0 +1,212 @@
+[
+  {
+    "symbol": "600519",
+    "market": "A",
+    "name": "贵州茅台",
+    "currency": "CNY",
+    "asset_class": "equity",
+    "r_level": "R3",
+    "metrics": {
+      "pe": 28.5,
+      "volatility": 0.22,
+      "market_cap_cny": 3500000000000
+    },
+    "tags": ["白酒", "消费", "大盘"]
+  },
+  {
+    "symbol": "000858",
+    "market": "A",
+    "name": "五粮液",
+    "currency": "CNY",
+    "asset_class": "equity",
+    "r_level": "R3",
+    "metrics": {
+      "pe": 22.3,
+      "volatility": 0.24,
+      "market_cap_cny": 850000000000
+    },
+    "tags": ["白酒", "消费"]
+  },
+  {
+    "symbol": "601318",
+    "market": "A",
+    "name": "中国平安",
+    "currency": "CNY",
+    "asset_class": "equity",
+    "r_level": "R3",
+    "metrics": {
+      "pe": 9.8,
+      "volatility": 0.19,
+      "market_cap_cny": 780000000000
+    },
+    "tags": ["保险", "金融"]
+  },
+  {
+    "symbol": "300750",
+    "market": "A",
+    "name": "宁德时代",
+    "currency": "CNY",
+    "asset_class": "equity",
+    "r_level": "R4",
+    "metrics": {
+      "pe": 35.6,
+      "volatility": 0.38,
+      "market_cap_cny": 1200000000000
+    },
+    "tags": ["新能源", "科技", "大盘"]
+  },
+  {
+    "symbol": "000001",
+    "market": "A",
+    "name": "平安银行",
+    "currency": "CNY",
+    "asset_class": "equity",
+    "r_level": "R2",
+    "metrics": {
+      "pe": 5.2,
+      "volatility": 0.14,
+      "market_cap_cny": 210000000000
+    },
+    "tags": ["银行", "金融"]
+  },
+  {
+    "symbol": "00700",
+    "market": "HK",
+    "name": "腾讯控股",
+    "currency": "HKD",
+    "asset_class": "equity",
+    "r_level": "R3",
+    "metrics": {
+      "pe": 18.2,
+      "volatility": 0.26,
+      "market_cap_hkd": 3200000000000
+    },
+    "tags": ["科技", "互联网", "大盘"]
+  },
+  {
+    "symbol": "09988",
+    "market": "HK",
+    "name": "阿里巴巴-W",
+    "currency": "HKD",
+    "asset_class": "equity",
+    "r_level": "R4",
+    "metrics": {
+      "pe": 14.5,
+      "volatility": 0.32,
+      "market_cap_hkd": 1800000000000
+    },
+    "tags": ["科技", "电商"]
+  },
+  {
+    "symbol": "03690",
+    "market": "HK",
+    "name": "美团-W",
+    "currency": "HKD",
+    "asset_class": "equity",
+    "r_level": "R4",
+    "metrics": {
+      "pe": 25.1,
+      "volatility": 0.35,
+      "market_cap_hkd": 720000000000
+    },
+    "tags": ["科技", "外卖"]
+  },
+  {
+    "symbol": "01299",
+    "market": "HK",
+    "name": "友邦保险",
+    "currency": "HKD",
+    "asset_class": "equity",
+    "r_level": "R3",
+    "metrics": {
+      "pe": 16.8,
+      "volatility": 0.18,
+      "market_cap_hkd": 580000000000
+    },
+    "tags": ["保险", "大盘"]
+  },
+  {
+    "symbol": "00005",
+    "market": "HK",
+    "name": "汇丰控股",
+    "currency": "HKD",
+    "asset_class": "equity",
+    "r_level": "R2",
+    "metrics": {
+      "pe": 8.4,
+      "volatility": 0.16,
+      "market_cap_hkd": 1100000000000
+    },
+    "tags": ["银行", "金融", "大盘"]
+  },
+  {
+    "symbol": "AAPL",
+    "market": "US",
+    "name": "Apple Inc.",
+    "currency": "USD",
+    "asset_class": "equity",
+    "r_level": "R3",
+    "metrics": {
+      "pe": 32.1,
+      "volatility": 0.24,
+      "market_cap_usd": 3100000000000
+    },
+    "tags": ["科技", "消费电子", "大盘"]
+  },
+  {
+    "symbol": "MSFT",
+    "market": "US",
+    "name": "Microsoft Corp.",
+    "currency": "USD",
+    "asset_class": "equity",
+    "r_level": "R3",
+    "metrics": {
+      "pe": 35.8,
+      "volatility": 0.22,
+      "market_cap_usd": 3400000000000
+    },
+    "tags": ["科技", "云计算", "大盘"]
+  },
+  {
+    "symbol": "NVDA",
+    "market": "US",
+    "name": "NVIDIA Corp.",
+    "currency": "USD",
+    "asset_class": "equity",
+    "r_level": "R5",
+    "metrics": {
+      "pe": 55.4,
+      "volatility": 0.52,
+      "market_cap_usd": 3600000000000
+    },
+    "tags": ["科技", "AI芯片"]
+  },
+  {
+    "symbol": "JPM",
+    "market": "US",
+    "name": "JPMorgan Chase",
+    "currency": "USD",
+    "asset_class": "equity",
+    "r_level": "R2",
+    "metrics": {
+      "pe": 12.5,
+      "volatility": 0.18,
+      "market_cap_usd": 580000000000
+    },
+    "tags": ["银行", "金融"]
+  },
+  {
+    "symbol": "BRK.B",
+    "market": "US",
+    "name": "Berkshire Hathaway B",
+    "currency": "USD",
+    "asset_class": "equity",
+    "r_level": "R2",
+    "metrics": {
+      "pe": 22.0,
+      "volatility": 0.15,
+      "market_cap_usd": 950000000000
+    },
+    "tags": ["价值", "多元化"]
+  }
+]

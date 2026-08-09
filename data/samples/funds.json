@@ -1,0 +1,159 @@
+[
+  {
+    "symbol": "510300",
+    "market": "A",
+    "name": "沪深300ETF",
+    "currency": "CNY",
+    "asset_class": "equity",
+    "r_level": "R3",
+    "metrics": {
+      "volatility": 0.20,
+      "tracking_error": 0.005,
+      "aum_cny": 120000000000
+    },
+    "tags": ["ETF", "宽基", "大盘"]
+  },
+  {
+    "symbol": "159915",
+    "market": "A",
+    "name": "创业板ETF",
+    "currency": "CNY",
+    "asset_class": "equity",
+    "r_level": "R4",
+    "metrics": {
+      "volatility": 0.35,
+      "tracking_error": 0.006,
+      "aum_cny": 25000000000
+    },
+    "tags": ["ETF", "创业板", "成长"]
+  },
+  {
+    "symbol": "003358",
+    "market": "A",
+    "name": "东方红产业升级基金",
+    "currency": "CNY",
+    "asset_class": "equity",
+    "r_level": "R3",
+    "metrics": {
+      "volatility": 0.22,
+      "annual_return_3y": 0.08
+    },
+    "tags": ["主动权益", "消费"]
+  },
+  {
+    "symbol": "519736",
+    "market": "A",
+    "name": "交银纯债A",
+    "currency": "CNY",
+    "asset_class": "bond",
+    "r_level": "R2",
+    "metrics": {
+      "yield": 0.032,
+      "duration": 3.2,
+      "volatility": 0.028,
+      "credit_rating": "AAA"
+    },
+    "tags": ["纯债", "利率债"]
+  },
+  {
+    "symbol": "000271",
+    "market": "A",
+    "name": "工银纯债A",
+    "currency": "CNY",
+    "asset_class": "bond",
+    "r_level": "R2",
+    "metrics": {
+      "yield": 0.031,
+      "duration": 4.1,
+      "volatility": 0.030,
+      "credit_rating": "AAA"
+    },
+    "tags": ["纯债", "利率债"]
+  },
+  {
+    "symbol": "161716",
+    "market": "A",
+    "name": "招商产业债A",
+    "currency": "CNY",
+    "asset_class": "bond",
+    "r_level": "R2",
+    "metrics": {
+      "yield": 0.038,
+      "duration": 2.8,
+      "volatility": 0.025,
+      "credit_rating": "AA+"
+    },
+    "tags": ["信用债", "中短期"]
+  },
+  {
+    "symbol": "000198",
+    "market": "A",
+    "name": "南方现金增利A",
+    "currency": "CNY",
+    "asset_class": "cash",
+    "r_level": "R1",
+    "metrics": {
+      "yield": 0.025,
+      "volatility": 0.002,
+      "duration": 0.08
+    },
+    "tags": ["货币基金", "流动性"]
+  },
+  {
+    "symbol": "000009",
+    "market": "A",
+    "name": "华夏现金增利A",
+    "currency": "CNY",
+    "asset_class": "cash",
+    "r_level": "R1",
+    "metrics": {
+      "yield": 0.024,
+      "volatility": 0.002,
+      "duration": 0.07
+    },
+    "tags": ["货币基金", "流动性"]
+  },
+  {
+    "symbol": "VXUS",
+    "market": "US",
+    "name": "Vanguard Total International Stock ETF",
+    "currency": "USD",
+    "asset_class": "equity",
+    "r_level": "R4",
+    "metrics": {
+      "volatility": 0.18,
+      "pe": 14.0,
+      "dividend_yield": 0.028
+    },
+    "tags": ["ETF", "国际股票", "QDII参考"]
+  },
+  {
+    "symbol": "005918",
+    "market": "A",
+    "name": "工银全球精选股票QDII",
+    "currency": "CNY",
+    "asset_class": "equity",
+    "r_level": "R4",
+    "metrics": {
+      "volatility": 0.22,
+      "annual_return_3y": 0.07,
+      "fx_exposure": 1.0
+    },
+    "tags": ["QDII", "全球股票"]
+  },
+  {
+    "symbol": "000934",
+    "market": "A",
+    "name": "广发全球债券QDII",
+    "currency": "CNY",
+    "asset_class": "bond",
+    "r_level": "R2",
+    "metrics": {
+      "yield": 0.042,
+      "duration": 5.5,
+      "volatility": 0.06,
+      "fx_exposure": 1.0
+    },
+    "tags": ["QDII", "全球债券"]
+  }
+]
