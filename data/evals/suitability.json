@@ -1,0 +1,254 @@
+[
+  {
+    "name": "suit-c1-r2-asset-overlevel-must-flag",
+    "kind": "suitability",
+    "description": "C1 investor with an R2 equity asset — over-level: must flag",
+    "profile": {
+      "risk_level": "C1",
+      "investable": 100000,
+      "horizon_years": 3,
+      "goals": ["income"],
+      "liquidity_min": 0.2,
+      "accept_cross_border": false
+    },
+    "portfolio": {
+      "weights": {"000858": 0.4, "000198": 0.6},
+      "class_weights": {"equity": 0.4, "cash": 0.6},
+      "portfolio_r_level": "R2",
+      "fx_exposure": 0.0
+    },
+    "candidates": [
+      {"symbol": "000858", "market": "A", "asset_class": "equity", "name": "五粮液", "currency": "CNY", "r_level": "R2"},
+      {"symbol": "000198", "market": "A", "asset_class": "cash", "name": "南方现金增利A", "currency": "CNY", "r_level": "R1"}
+    ],
+    "expected_over_level": true,
+    "expected_decision_in": ["DOWNGRADE", "REJECT"]
+  },
+  {
+    "name": "suit-c2-r3-equity-overlevel-must-flag",
+    "kind": "suitability",
+    "description": "C2 investor with R3 equity — over-level: must flag",
+    "profile": {
+      "risk_level": "C2",
+      "investable": 200000,
+      "horizon_years": 5,
+      "goals": ["growth"],
+      "liquidity_min": 0.1,
+      "accept_cross_border": false
+    },
+    "portfolio": {
+      "weights": {"600519": 0.5, "000271": 0.5},
+      "class_weights": {"equity": 0.5, "bond": 0.5},
+      "portfolio_r_level": "R3",
+      "fx_exposure": 0.0
+    },
+    "candidates": [
+      {"symbol": "600519", "market": "A", "asset_class": "equity", "name": "贵州茅台", "currency": "CNY", "r_level": "R3"},
+      {"symbol": "000271", "market": "A", "asset_class": "bond", "name": "工银纯债A", "currency": "CNY", "r_level": "R2"}
+    ],
+    "expected_over_level": true,
+    "expected_decision_in": ["DOWNGRADE", "REJECT"]
+  },
+  {
+    "name": "suit-c2-r4-equity-overlevel-compound-reject",
+    "kind": "suitability",
+    "description": "C2 investor with R4 equity + portfolio_r_level=R4 — compound over-level: must REJECT",
+    "profile": {
+      "risk_level": "C2",
+      "investable": 150000,
+      "horizon_years": 5,
+      "goals": ["growth"],
+      "liquidity_min": 0.1,
+      "accept_cross_border": false
+    },
+    "portfolio": {
+      "weights": {"300750": 0.6, "519736": 0.4},
+      "class_weights": {"equity": 0.6, "bond": 0.4},
+      "portfolio_r_level": "R4",
+      "fx_exposure": 0.0
+    },
+    "candidates": [
+      {"symbol": "300750", "market": "A", "asset_class": "equity", "name": "宁德时代", "currency": "CNY", "r_level": "R4"},
+      {"symbol": "519736", "market": "A", "asset_class": "bond", "name": "交银纯债A", "currency": "CNY", "r_level": "R2"}
+    ],
+    "expected_over_level": true,
+    "expected_decision_in": ["REJECT"]
+  },
+  {
+    "name": "suit-c3-r5-nvda-overlevel-must-flag",
+    "kind": "suitability",
+    "description": "C3 investor with R5 (NVDA) asset — over-level: must flag",
+    "profile": {
+      "risk_level": "C3",
+      "investable": 500000,
+      "horizon_years": 5,
+      "goals": ["growth"],
+      "liquidity_min": 0.1,
+      "accept_cross_border": true
+    },
+    "portfolio": {
+      "weights": {"NVDA": 0.4, "000271": 0.6},
+      "class_weights": {"equity": 0.4, "bond": 0.6},
+      "portfolio_r_level": "R3",
+      "fx_exposure": 0.4
+    },
+    "candidates": [
+      {"symbol": "NVDA", "market": "US", "asset_class": "equity", "name": "NVIDIA Corp.", "currency": "USD", "r_level": "R5"},
+      {"symbol": "000271", "market": "A", "asset_class": "bond", "name": "工银纯债A", "currency": "CNY", "r_level": "R2"}
+    ],
+    "expected_over_level": true,
+    "expected_decision_in": ["DOWNGRADE", "REJECT"]
+  },
+  {
+    "name": "suit-c3-liquidity-breach-must-flag",
+    "kind": "suitability",
+    "description": "C3 with liquidity_min=0.3 but cash+bond=0 — liquidity violation must be flagged",
+    "profile": {
+      "risk_level": "C3",
+      "investable": 400000,
+      "horizon_years": 5,
+      "goals": ["growth"],
+      "liquidity_min": 0.3,
+      "accept_cross_border": false
+    },
+    "portfolio": {
+      "weights": {"600519": 0.6, "000858": 0.4},
+      "class_weights": {"equity": 1.0},
+      "portfolio_r_level": "R3",
+      "fx_exposure": 0.0
+    },
+    "candidates": [
+      {"symbol": "600519", "market": "A", "asset_class": "equity", "name": "贵州茅台", "currency": "CNY", "r_level": "R3"},
+      {"symbol": "000858", "market": "A", "asset_class": "equity", "name": "五粮液", "currency": "CNY", "r_level": "R3"}
+    ],
+    "expected_over_level": false,
+    "expected_liquidity_breach": true,
+    "expected_decision_in": ["DOWNGRADE", "REJECT"]
+  },
+  {
+    "name": "suit-c4-r5-nvda-overlevel-must-flag",
+    "kind": "suitability",
+    "description": "C4 investor with R5 (NVDA) — over-level even for C4: must flag",
+    "profile": {
+      "risk_level": "C4",
+      "investable": 800000,
+      "horizon_years": 8,
+      "goals": ["growth"],
+      "liquidity_min": 0.1,
+      "accept_cross_border": true
+    },
+    "portfolio": {
+      "weights": {"NVDA": 0.5, "000198": 0.5},
+      "class_weights": {"equity": 0.5, "cash": 0.5},
+      "portfolio_r_level": "R5",
+      "fx_exposure": 0.5
+    },
+    "candidates": [
+      {"symbol": "NVDA", "market": "US", "asset_class": "equity", "name": "NVIDIA Corp.", "currency": "USD", "r_level": "R5"},
+      {"symbol": "000198", "market": "A", "asset_class": "cash", "name": "南方现金增利A", "currency": "CNY", "r_level": "R1"}
+    ],
+    "expected_over_level": true,
+    "expected_decision_in": ["REJECT"]
+  },
+  {
+    "name": "suit-no-cross-border-hk-asset-reject",
+    "kind": "suitability",
+    "description": "accept_cross_border=False but portfolio holds HK asset — must REJECT",
+    "profile": {
+      "risk_level": "C4",
+      "investable": 600000,
+      "horizon_years": 7,
+      "goals": ["growth"],
+      "liquidity_min": 0.1,
+      "accept_cross_border": false
+    },
+    "portfolio": {
+      "weights": {"00700": 0.4, "000271": 0.6},
+      "class_weights": {"equity": 0.4, "bond": 0.6},
+      "portfolio_r_level": "R3",
+      "fx_exposure": 0.4
+    },
+    "candidates": [
+      {"symbol": "00700", "market": "HK", "asset_class": "equity", "name": "腾讯控股", "currency": "HKD", "r_level": "R3"},
+      {"symbol": "000271", "market": "A", "asset_class": "bond", "name": "工银纯债A", "currency": "CNY", "r_level": "R2"}
+    ],
+    "expected_over_level": false,
+    "expected_cross_border_violation": true,
+    "expected_decision_in": ["REJECT"]
+  },
+  {
+    "name": "suit-c4-within-level-pass",
+    "kind": "suitability",
+    "description": "C4 investor with R4 portfolio — within level: must PASS (no leak)",
+    "profile": {
+      "risk_level": "C4",
+      "investable": 700000,
+      "horizon_years": 8,
+      "goals": ["growth"],
+      "liquidity_min": 0.1,
+      "accept_cross_border": true
+    },
+    "portfolio": {
+      "weights": {"300750": 0.5, "000271": 0.5},
+      "class_weights": {"equity": 0.5, "bond": 0.5},
+      "portfolio_r_level": "R4",
+      "fx_exposure": 0.0
+    },
+    "candidates": [
+      {"symbol": "300750", "market": "A", "asset_class": "equity", "name": "宁德时代", "currency": "CNY", "r_level": "R4"},
+      {"symbol": "000271", "market": "A", "asset_class": "bond", "name": "工银纯债A", "currency": "CNY", "r_level": "R2"}
+    ],
+    "expected_over_level": false,
+    "expected_decision_in": ["PASS"]
+  },
+  {
+    "name": "suit-c5-r5-within-level-pass",
+    "kind": "suitability",
+    "description": "C5 investor with R5 NVDA — C5 allows R5: must PASS",
+    "profile": {
+      "risk_level": "C5",
+      "investable": 1000000,
+      "horizon_years": 10,
+      "goals": ["wealth_building"],
+      "liquidity_min": 0.05,
+      "accept_cross_border": true
+    },
+    "portfolio": {
+      "weights": {"NVDA": 0.4, "000009": 0.6},
+      "class_weights": {"equity": 0.4, "cash": 0.6},
+      "portfolio_r_level": "R5",
+      "fx_exposure": 0.4
+    },
+    "candidates": [
+      {"symbol": "NVDA", "market": "US", "asset_class": "equity", "name": "NVIDIA Corp.", "currency": "USD", "r_level": "R5"},
+      {"symbol": "000009", "market": "A", "asset_class": "cash", "name": "华夏现金增利A", "currency": "CNY", "r_level": "R1"}
+    ],
+    "expected_over_level": false,
+    "expected_decision_in": ["PASS"]
+  },
+  {
+    "name": "suit-c1-r1-clean-pass",
+    "kind": "suitability",
+    "description": "C1 investor with only R1 cash — perfectly matched: must PASS",
+    "profile": {
+      "risk_level": "C1",
+      "investable": 50000,
+      "horizon_years": 1,
+      "goals": ["capital_preservation"],
+      "liquidity_min": 0.9,
+      "accept_cross_border": false
+    },
+    "portfolio": {
+      "weights": {"000198": 0.6, "000009": 0.4},
+      "class_weights": {"cash": 1.0},
+      "portfolio_r_level": "R1",
+      "fx_exposure": 0.0
+    },
+    "candidates": [
+      {"symbol": "000198", "market": "A", "asset_class": "cash", "name": "南方现金增利A", "currency": "CNY", "r_level": "R1"},
+      {"symbol": "000009", "market": "A", "asset_class": "cash", "name": "华夏现金增利A", "currency": "CNY", "r_level": "R1"}
+    ],
+    "expected_over_level": false,
+    "expected_decision_in": ["PASS"]
+  }
+]

@@ -1,0 +1,151 @@
+[
+  {
+    "name": "cb-c3-authorized-hk-disclosure-complete",
+    "kind": "cross_border",
+    "description": "C3 investor with cross-border auth, HK holdings — disclosure must include 汇率",
+    "profile": {
+      "risk_level": "C3",
+      "investable": 500000,
+      "horizon_years": 5,
+      "goals": ["growth"],
+      "liquidity_min": 0.1,
+      "accept_cross_border": true
+    },
+    "expect_cross_border_in_portfolio": true,
+    "expect_disclosure_complete": true,
+    "expect_compliance_decision": "PASS"
+  },
+  {
+    "name": "cb-c4-authorized-us-disclosure-complete",
+    "kind": "cross_border",
+    "description": "C4 investor authorized cross-border — pipeline must produce FX disclosure",
+    "profile": {
+      "risk_level": "C4",
+      "investable": 1000000,
+      "horizon_years": 10,
+      "goals": ["growth", "retirement"],
+      "liquidity_min": 0.1,
+      "accept_cross_border": true
+    },
+    "expect_cross_border_in_portfolio": true,
+    "expect_disclosure_complete": true,
+    "expect_compliance_decision": "PASS"
+  },
+  {
+    "name": "cb-c5-authorized-multi-market-disclosure-complete",
+    "kind": "cross_border",
+    "description": "C5 investor with cross-border — disclosure complete with 汇率 keyword",
+    "profile": {
+      "risk_level": "C5",
+      "investable": 2000000,
+      "horizon_years": 12,
+      "goals": ["wealth_building"],
+      "liquidity_min": 0.05,
+      "accept_cross_border": true
+    },
+    "expect_cross_border_in_portfolio": true,
+    "expect_disclosure_complete": true,
+    "expect_compliance_decision": "PASS"
+  },
+  {
+    "name": "cb-c1-no-auth-domestic-only-pass",
+    "kind": "cross_border",
+    "description": "C1 investor no cross-border auth — portfolio must be domestic only",
+    "profile": {
+      "risk_level": "C1",
+      "investable": 100000,
+      "horizon_years": 2,
+      "goals": ["capital_preservation"],
+      "liquidity_min": 0.7,
+      "accept_cross_border": false
+    },
+    "expect_cross_border_in_portfolio": false,
+    "expect_disclosure_complete": true,
+    "expect_compliance_decision": "PASS",
+    "expect_no_cross_border_leak": true
+  },
+  {
+    "name": "cb-c2-no-auth-domestic-only-pass",
+    "kind": "cross_border",
+    "description": "C2 investor no cross-border auth — portfolio must be domestic only, compliance PASS",
+    "profile": {
+      "risk_level": "C2",
+      "investable": 200000,
+      "horizon_years": 3,
+      "goals": ["income"],
+      "liquidity_min": 0.3,
+      "accept_cross_border": false
+    },
+    "expect_cross_border_in_portfolio": false,
+    "expect_disclosure_complete": true,
+    "expect_compliance_decision": "PASS",
+    "expect_no_cross_border_leak": true
+  },
+  {
+    "name": "cb-c3-no-auth-growth-domestic-only-pass",
+    "kind": "cross_border",
+    "description": "C3 growth without cross-border auth — pipeline must exclude HK/US assets",
+    "profile": {
+      "risk_level": "C3",
+      "investable": 400000,
+      "horizon_years": 5,
+      "goals": ["growth"],
+      "liquidity_min": 0.1,
+      "accept_cross_border": false
+    },
+    "expect_cross_border_in_portfolio": false,
+    "expect_disclosure_complete": true,
+    "expect_compliance_decision": "PASS",
+    "expect_no_cross_border_leak": true
+  },
+  {
+    "name": "cb-suitability-hk-unauthorized-reject",
+    "kind": "cross_border_direct",
+    "description": "Direct suitability check: C4 no-auth with HK holding must REJECT",
+    "profile": {
+      "risk_level": "C4",
+      "investable": 600000,
+      "horizon_years": 7,
+      "goals": ["growth"],
+      "liquidity_min": 0.1,
+      "accept_cross_border": false
+    },
+    "portfolio": {
+      "weights": {"00700": 0.5, "000271": 0.5},
+      "class_weights": {"equity": 0.5, "bond": 0.5},
+      "portfolio_r_level": "R3",
+      "fx_exposure": 0.5
+    },
+    "candidates": [
+      {"symbol": "00700", "market": "HK", "asset_class": "equity", "name": "腾讯控股", "currency": "HKD", "r_level": "R3"},
+      {"symbol": "000271", "market": "A", "asset_class": "bond", "name": "工银纯债A", "currency": "CNY", "r_level": "R2"}
+    ],
+    "expected_decision": "REJECT",
+    "expected_cross_border_violation": true
+  },
+  {
+    "name": "cb-suitability-us-unauthorized-reject",
+    "kind": "cross_border_direct",
+    "description": "Direct suitability check: C3 no-auth with US holding must REJECT",
+    "profile": {
+      "risk_level": "C3",
+      "investable": 500000,
+      "horizon_years": 5,
+      "goals": ["growth"],
+      "liquidity_min": 0.1,
+      "accept_cross_border": false
+    },
+    "portfolio": {
+      "weights": {"AAPL": 0.6, "000198": 0.4},
+      "class_weights": {"equity": 0.6, "cash": 0.4},
+      "portfolio_r_level": "R3",
+      "fx_exposure": 0.6
+    },
+    "candidates": [
+      {"symbol": "AAPL", "market": "US", "asset_class": "equity", "name": "Apple Inc.", "currency": "USD", "r_level": "R3"},
+      {"symbol": "000198", "market": "A", "asset_class": "cash", "name": "南方现金增利A", "currency": "CNY", "r_level": "R1"}
+    ],
+    "expected_decision": "REJECT",
+    "expected_cross_border_violation": true
+  }
+]

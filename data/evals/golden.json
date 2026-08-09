@@ -1,0 +1,205 @@
+[
+  {
+    "name": "c1-capital-preservation-pass",
+    "kind": "decision",
+    "profile": {
+      "risk_level": "C1",
+      "investable": 80000,
+      "horizon_years": 2,
+      "goals": ["capital_preservation"],
+      "liquidity_min": 0.8,
+      "accept_cross_border": false
+    },
+    "expected_status": "done",
+    "expected_compliance_decision": "PASS",
+    "expected_portfolio_r_level_ceiling": "R1"
+  },
+  {
+    "name": "c1-income-no-cross-border-pass",
+    "kind": "decision",
+    "profile": {
+      "risk_level": "C1",
+      "investable": 120000,
+      "horizon_years": 3,
+      "goals": ["income"],
+      "liquidity_min": 0.6,
+      "accept_cross_border": false
+    },
+    "expected_status": "done",
+    "expected_compliance_decision": "PASS",
+    "expected_portfolio_r_level_ceiling": "R1"
+  },
+  {
+    "name": "c2-income-domestic-pass",
+    "kind": "decision",
+    "profile": {
+      "risk_level": "C2",
+      "investable": 300000,
+      "horizon_years": 3,
+      "goals": ["income"],
+      "liquidity_min": 0.3,
+      "accept_cross_border": false
+    },
+    "expected_status": "done",
+    "expected_compliance_decision": "PASS",
+    "expected_portfolio_r_level_ceiling": "R2"
+  },
+  {
+    "name": "c2-short-horizon-income-pass",
+    "kind": "decision",
+    "profile": {
+      "risk_level": "C2",
+      "investable": 150000,
+      "horizon_years": 1,
+      "goals": ["income"],
+      "liquidity_min": 0.5,
+      "accept_cross_border": false
+    },
+    "expected_status": "done",
+    "expected_compliance_decision": "PASS",
+    "expected_portfolio_r_level_ceiling": "R2"
+  },
+  {
+    "name": "c3-growth-cross-border-pass",
+    "kind": "decision",
+    "profile": {
+      "risk_level": "C3",
+      "investable": 500000,
+      "horizon_years": 5,
+      "goals": ["growth"],
+      "liquidity_min": 0.1,
+      "accept_cross_border": true
+    },
+    "expected_status": "done",
+    "expected_compliance_decision": "PASS",
+    "expected_portfolio_r_level_ceiling": "R3"
+  },
+  {
+    "name": "c3-education-domestic-pass",
+    "kind": "decision",
+    "profile": {
+      "risk_level": "C3",
+      "investable": 300000,
+      "horizon_years": 3,
+      "goals": ["education"],
+      "liquidity_min": 0.2,
+      "accept_cross_border": false
+    },
+    "expected_status": "done",
+    "expected_compliance_decision": "PASS",
+    "expected_portfolio_r_level_ceiling": "R3"
+  },
+  {
+    "name": "c3-balanced-no-cross-border-pass",
+    "kind": "decision",
+    "profile": {
+      "risk_level": "C3",
+      "investable": 400000,
+      "horizon_years": 5,
+      "goals": ["income", "growth"],
+      "liquidity_min": 0.15,
+      "accept_cross_border": false
+    },
+    "expected_status": "done",
+    "expected_compliance_decision": "PASS",
+    "expected_portfolio_r_level_ceiling": "R3"
+  },
+  {
+    "name": "c4-growth-retirement-cross-border-pass",
+    "kind": "decision",
+    "profile": {
+      "risk_level": "C4",
+      "investable": 1000000,
+      "horizon_years": 15,
+      "goals": ["retirement", "growth"],
+      "liquidity_min": 0.1,
+      "accept_cross_border": true
+    },
+    "expected_status": "done",
+    "expected_compliance_decision": "PASS",
+    "expected_portfolio_r_level_ceiling": "R4"
+  },
+  {
+    "name": "c4-retirement-long-horizon-pass",
+    "kind": "decision",
+    "profile": {
+      "risk_level": "C4",
+      "investable": 800000,
+      "horizon_years": 10,
+      "goals": ["retirement"],
+      "liquidity_min": 0.1,
+      "accept_cross_border": true
+    },
+    "expected_status": "done",
+    "expected_compliance_decision": "PASS",
+    "expected_portfolio_r_level_ceiling": "R4"
+  },
+  {
+    "name": "c4-no-cross-border-domestic-pass",
+    "kind": "decision",
+    "profile": {
+      "risk_level": "C4",
+      "investable": 600000,
+      "horizon_years": 7,
+      "goals": ["growth"],
+      "liquidity_min": 0.1,
+      "accept_cross_border": false
+    },
+    "expected_status": "done",
+    "expected_compliance_decision": "PASS",
+    "expected_portfolio_r_level_ceiling": "R4"
+  },
+  {
+    "name": "c5-wealth-building-cross-border-pass",
+    "kind": "decision",
+    "profile": {
+      "risk_level": "C5",
+      "investable": 2000000,
+      "horizon_years": 10,
+      "goals": ["wealth_building"],
+      "liquidity_min": 0.05,
+      "accept_cross_border": true
+    },
+    "expected_status": "done",
+    "expected_compliance_decision": "PASS",
+    "expected_portfolio_r_level_ceiling": "R5"
+  },
+  {
+    "name": "c5-multi-goal-long-horizon-pass",
+    "kind": "decision",
+    "profile": {
+      "risk_level": "C5",
+      "investable": 1500000,
+      "horizon_years": 12,
+      "goals": ["growth", "retirement", "wealth_building"],
+      "liquidity_min": 0.05,
+      "accept_cross_border": true
+    },
+    "expected_status": "done",
+    "expected_compliance_decision": "PASS",
+    "expected_portfolio_r_level_ceiling": "R5"
+  },
+  {
+    "name": "c5-no-cross-border-domestic-pass",
+    "kind": "decision",
+    "profile": {
+      "risk_level": "C5",
+      "investable": 1000000,
+      "horizon_years": 8,
+      "goals": ["growth"],
+      "liquidity_min": 0.05,
+      "accept_cross_border": false
+    },
+    "expected_status": "done",
+    "expected_compliance_decision": "PASS",
+    "expected_portfolio_r_level_ceiling": "R5"
+  },
+  {
+    "name": "none-profile-guardrail-blocked",
+    "kind": "decision",
+    "profile": null,
+    "expected_status": "GUARDRAIL_BLOCKED",
+    "expected_compliance_decision": null,
+    "expected_portfolio_r_level_ceiling": null
+  }
+]

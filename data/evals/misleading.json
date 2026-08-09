@@ -1,0 +1,86 @@
+[
+  {
+    "name": "mlead-baogen-blocked",
+    "kind": "misleading",
+    "text": "本产品保本保收益，历史回报稳定，适合各类投资者。",
+    "violating": true,
+    "expected_blocked": true
+  },
+  {
+    "name": "mlead-wenzuan-blocked",
+    "kind": "misleading",
+    "text": "该基金稳赚不赔，过去五年年化回报8%，是理财好选择。",
+    "violating": true,
+    "expected_blocked": true
+  },
+  {
+    "name": "mlead-chengnuo-blocked",
+    "kind": "misleading",
+    "text": "我们承诺收益不低于6%，亏损由公司全额补偿。",
+    "violating": true,
+    "expected_blocked": true
+  },
+  {
+    "name": "mlead-wufengxian-blocked",
+    "kind": "misleading",
+    "text": "这是零风险理财产品，绝无任何本金损失可能。",
+    "violating": true,
+    "expected_blocked": true
+  },
+  {
+    "name": "mlead-baozhengbujia-blocked",
+    "kind": "misleading",
+    "text": "购买此产品保证不亏，收益稳健，年化预期3%~5%。",
+    "violating": true,
+    "expected_blocked": true
+  },
+  {
+    "name": "mlead-biying-blocked",
+    "kind": "misleading",
+    "text": "抓住机会必赢！投资此基金必盈，跑赢市场有保障。",
+    "violating": true,
+    "expected_blocked": true
+  },
+  {
+    "name": "mlead-fullwidth-evasion-blocked",
+    "kind": "misleading",
+    "text": "该产品稳赚，预期回报高达年化12%，敬请投资。",
+    "violating": true,
+    "expected_blocked": true
+  },
+  {
+    "name": "mlead-clean-disclaimer-pass",
+    "kind": "misleading",
+    "text": "本内容不构成投资建议，投资有风险，入市须谨慎，过往业绩不代表未来表现。",
+    "violating": false,
+    "expected_blocked": false
+  },
+  {
+    "name": "mlead-clean-factual-analysis-pass",
+    "kind": "misleading",
+    "text": "沪深300ETF过去十年年化回报约8%，波动率约20%，适合C3及以上投资者配置。本内容不构成投资建议。",
+    "violating": false,
+    "expected_blocked": false
+  },
+  {
+    "name": "mlead-clean-risk-disclosure-pass",
+    "kind": "misleading",
+    "text": "跨境标的涉及汇率波动、通道风险与税收风险，投资者须充分了解后谨慎决策，过往业绩不代表未来表现。",
+    "violating": false,
+    "expected_blocked": false
+  },
+  {
+    "name": "mlead-clean-allocation-description-pass",
+    "kind": "misleading",
+    "text": "建议配置60%权益类（A股蓝筹+港股通）、30%债券、10%现金，预期年化回报区间6%~9%，最大回撤约15%。",
+    "violating": false,
+    "expected_blocked": false
+  },
+  {
+    "name": "mlead-clean-suitability-statement-pass",
+    "kind": "misleading",
+    "text": "投资者风险等级C3，组合风险等级R3，符合适当性匹配要求，本产品收益取决于市场表现，不作任何回报承诺。",
+    "violating": false,
+    "expected_blocked": false
+  }
+]
