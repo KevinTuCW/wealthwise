@@ -4,13 +4,21 @@ Mirror of shopscout.eval for the wealthwise advisory pipeline.
 
 Suites
 ------
-golden        — end-to-end pipeline decision accuracy (status, compliance, portfolio_r).
-suitability   — suitability function hard gate: zero-leaks on over-level / liquidity /
-                cross-border violations.
-misleading    — misleading-language block rate: must block 1.0 of violating texts and
-                not false-positive on clean disclaimers.
-cross_border  — cross-border disclosure completeness + unauthorized-holding gate.
-robustness    — injection block rate, invariance pass rate, and benign false-positive rate.
+golden         — end-to-end pipeline decision accuracy (status, compliance, portfolio_r).
+                 NOTE: golden covers the happy path only (all PASS profiles); it cannot
+                 detect regressions in the DOWNGRADE/REJECT routing because
+                 decision_accuracy=1.0 is structurally guaranteed when all cases are PASS.
+                 Use status_routing for guardrail-path coverage.
+suitability    — suitability function hard gate: zero-leaks on over-level / liquidity /
+                 cross-border violations.
+misleading     — misleading-language block rate: must block 1.0 of violating texts and
+                 not false-positive on clean disclaimers.
+cross_border   — cross-border disclosure completeness + unauthorized-holding gate.
+robustness     — injection block rate, invariance pass rate, and benign false-positive rate.
+status_routing — pipeline-level DOWNGRADE/REJECT path coverage with injected bad candidates.
+                 HARD GATE: status_routing_accuracy == 1.0 (every case must route correctly).
+                 This suite is the primary defence against regressions in reflection→finalize
+                 or the REJECT/DOWNGRADE routing logic.
 
 Hard Gates (exit 2)
 -------------------
@@ -20,6 +28,7 @@ cross_border_leaks == 0
 injection_block_rate == 1.0
 invariance_pass_rate == 1.0
 false_positive_rate == 0.0
+status_routing_accuracy == 1.0   ← protects REJECT/DOWNGRADE pipeline routing
 
 Soft Gate (exit 1 unless --min-accuracy lowered)
 -------------------------------------------------
@@ -30,6 +39,7 @@ Usage
     python -m wealthwise.eval                  # all suites
     python -m wealthwise.eval --suite golden   # single suite by name
     python -m wealthwise.eval --min-accuracy 0.9
+    python -m wealthwise.eval --min-cases 58   # defensive against silently-emptied suites
 """
 from __future__ import annotations
 
@@ -46,14 +56,15 @@ from wealthwise.agents.state import (
     InvestorProfile,
     PortfolioAllocation,
 )
-from wealthwise.bootstrap import build_sample_deps
+from wealthwise.bootstrap import OfflineJuryClient, build_sample_deps
 from wealthwise.compliance.language import detect_misleading
 from wealthwise.compliance.suitability import check_suitability, is_over_level
 from wealthwise.guardrails.output import has_complete_disclosures
 from wealthwise.runner import run_advisory
 from wealthwise.security.sanitize import detect_injection
 
-DEFAULT_SUITES = ("golden", "suitability", "misleading", "cross_border", "robustness")
+DEFAULT_SUITES = ("golden", "suitability", "misleading", "cross_border", "robustness",
+                  "status_routing")
 _GUARDRAIL_BLOCKED_STATUSES = {"GUARDRAIL_BLOCKED"}
 
 
@@ -104,6 +115,74 @@ def _portfolio_has_cross_border(state) -> bool:
         if w > 0 and sym_market.get(sym, "A") in {"HK", "US"}:
             return True
     return False
+
+
+def _build_injected_deps(
+    inject_candidate: dict | None = None,
+    inject_exclude_asset_classes: list[str] | None = None,
+) -> "AdvisoryDeps":  # type: ignore[name-defined]
+    """Build an AdvisoryDeps with a thin wrapper market provider for eval injection.
+
+    Two injection modes (combinable):
+      inject_candidate: dict
+          A single candidate dict (AssetCandidate fields) that is appended to the
+          results of screen("A", {"asset_class": "equity"}).  Used to introduce
+          cross-border or over-level assets that would not ordinarily appear in the
+          sample pool.
+      inject_exclude_asset_classes: list[str]
+          Asset classes whose candidates are removed from all screen results.  Used
+          to eliminate the bond/cash pool and force a liquidity-floor breach for
+          DOWNGRADE test cases.
+
+    This helper is the only place in eval.py where market-provider internals are
+    touched — all other eval functions use build_sample_deps() unmodified.
+    """
+    from wealthwise.agents.deps import AdvisoryDeps
+    from wealthwise.config import get_settings
+    from wealthwise.providers.sample import (
+        SampleFXProvider,
+        SampleMacroProvider,
+        SampleMarketProvider,
+    )
+    from wealthwise.rag.corpus import load_policy_retriever, load_research_retriever
+    from wealthwise.rag.embed import LocalHashingEmbedder
+
+    s = get_settings()
+    data_dir = s.sample_data_dir
+    exclude_classes: set[str] = set(inject_exclude_asset_classes or [])
+
+    # Build the injected candidate object once (if provided)
+    injected: AssetCandidate | None = None
+    if inject_candidate:
+        injected = AssetCandidate(**inject_candidate)
+
+    class _WrappedMarketProvider(SampleMarketProvider):
+        def screen(self, market: str, filters: dict) -> list[AssetCandidate]:
+            results = super().screen(market, filters)
+            # Exclude specified asset classes from all screen results
+            if exclude_classes:
+                results = [
+                    r for r in results
+                    if r.asset_class not in exclude_classes
+                ]
+            # Inject candidate into the A-market equity screen
+            if injected is not None and market == "A" and filters.get("asset_class") == "equity":
+                results = list(results) + [injected]
+            return results
+
+    embedder = LocalHashingEmbedder(dim=s.embed_dim)
+    return AdvisoryDeps(
+        market=_WrappedMarketProvider(data_dir),
+        macro=SampleMacroProvider(data_dir),
+        fx=SampleFXProvider(data_dir),
+        jury_clients=[OfflineJuryClient("offline-a"), OfflineJuryClient("offline-b")],
+        policy_retriever=load_policy_retriever(data_dir, embedder),
+        research_retriever=load_research_retriever(data_dir, embedder),
+        embedder=embedder,
+        max_fx_exposure=s.max_fx_exposure,
+        risk_budget_method=s.risk_budget_method,
+        max_llm_judgments=s.max_llm_judgments,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -401,6 +480,11 @@ def _run_robustness(cases: list[dict], deps, suite: str) -> tuple[list[EvalResul
     injection kind   — goal text with attack pattern → status must be GUARDRAIL_BLOCKED.
     invariance kind  — base + variants → compliance.decision must be identical.
     false_positive kind — benign profile → status must NOT be GUARDRAIL_BLOCKED.
+
+    NOTE on invariance gate: the invariance_pass_rate == 1.0 gate is most meaningful
+    on the real-LLM-provider path.  On the offline path the OfflineJuryClient is
+    fully deterministic, so invariance is guaranteed by construction — it serves as
+    a regression canary rather than a true stochastic-stability test.
     """
     results: list[EvalResult] = []
     inj_total = inj_blocked = 0
@@ -489,6 +573,89 @@ def _run_robustness(cases: list[dict], deps, suite: str) -> tuple[list[EvalResul
     return results, metrics
 
 
+def _run_status_routing(cases: list[dict], suite: str) -> tuple[list[EvalResult], dict]:
+    """Drive run_advisory end-to-end with injected bad candidates and assert pipeline STATUS.
+
+    Each case specifies:
+      profile                      — InvestorProfile dict
+      inject_candidate             — optional dict of AssetCandidate fields to inject into
+                                     the A-market equity screen (wraps the sample provider).
+      inject_exclude_asset_classes — optional list of asset classes to suppress from all
+                                     screen results (used to force a liquidity shortfall).
+      expected_status_in           — set of acceptable pipeline statuses (done, CANNOT_ISSUE,
+                                     NEEDS_HUMAN_REVIEW, …)
+      expected_compliance_decision_in — set of acceptable compliance decisions (PASS,
+                                     DOWNGRADE, REJECT)
+
+    HARD GATE: status_routing_accuracy == 1.0.  Any case whose actual status or
+    compliance decision is outside the expected band causes a FAIL.  If
+    reflection→finalize or the REJECT/DOWNGRADE routing regresses, this suite fails.
+
+    The suite also includes 1–2 control PASS cases to verify that injection
+    infrastructure does not break normal PASS paths.
+    """
+    results: list[EvalResult] = []
+    n_total = n_correct = 0
+
+    for case in cases:
+        profile_dict = case.get("profile")
+        profile = _build_profile(profile_dict) if profile_dict else None
+
+        # Build deps: inject a wrapped market provider if any injection keys are present
+        inject_cand = case.get("inject_candidate")
+        inject_exclude = case.get("inject_exclude_asset_classes")
+
+        if inject_cand is not None or inject_exclude is not None:
+            deps = _build_injected_deps(
+                inject_candidate=inject_cand,
+                inject_exclude_asset_classes=inject_exclude,
+            )
+        else:
+            deps = build_sample_deps()
+
+        state = run_advisory(profile, deps)
+
+        expected_statuses: list[str] = case.get("expected_status_in", ["done"])
+        expected_decisions: list[str] = case.get("expected_compliance_decision_in", [])
+
+        failures: list[str] = []
+
+        # Status check
+        if state.status not in expected_statuses:
+            failures.append(
+                f"status {state.status!r} not in expected {expected_statuses}"
+            )
+
+        # Compliance decision check (only relevant when pipeline ran past compliance)
+        if expected_decisions:
+            actual_decision = state.compliance.decision if state.compliance else None
+            if actual_decision not in expected_decisions:
+                failures.append(
+                    f"compliance.decision {actual_decision!r} not in expected {expected_decisions}"
+                )
+
+        n_total += 1
+        if not failures:
+            n_correct += 1
+
+        reason = "; ".join(failures)
+        results.append(EvalResult(
+            name=case["name"],
+            kind=case.get("kind", "status_routing"),
+            suite=suite,
+            passed=(not failures),
+            reason=reason,
+        ))
+
+    accuracy = n_correct / n_total if n_total else 1.0
+    metrics = {
+        "status_routing_accuracy": accuracy,
+        "n_total": n_total,
+        "n_correct": n_correct,
+    }
+    return results, metrics
+
+
 # ---------------------------------------------------------------------------
 # Public entry point — importable for tests
 # ---------------------------------------------------------------------------
@@ -518,6 +685,8 @@ def run_eval(suite_name_or_path: str | Path) -> tuple[list[EvalResult], dict[str
         return _run_cross_border(cases, deps, suite)
     elif suite == "robustness":
         return _run_robustness(cases, deps, suite)
+    elif suite == "status_routing":
+        return _run_status_routing(cases, suite)
     else:
         # Fallback: try to auto-detect by kind of first case
         first_kind = cases[0].get("kind", "") if cases else ""
@@ -529,6 +698,8 @@ def run_eval(suite_name_or_path: str | Path) -> tuple[list[EvalResult], dict[str
             return _run_suitability(cases, suite)
         elif first_kind in ("cross_border", "cross_border_direct"):
             return _run_cross_border(cases, deps, suite)
+        elif first_kind in ("status_routing",):
+            return _run_status_routing(cases, suite)
         else:
             return _run_golden(cases, deps, suite)
 
@@ -566,6 +737,9 @@ def run_all_suites(
     agg_metrics["injection_block_rate"] = agg_metrics.get("robustness.injection_block_rate", 1.0)
     agg_metrics["invariance_pass_rate"] = agg_metrics.get("robustness.invariance_pass_rate", 1.0)
     agg_metrics["false_positive_rate"] = agg_metrics.get("robustness.false_positive_rate", 0.0)
+    agg_metrics["status_routing_accuracy"] = agg_metrics.get(
+        "status_routing.status_routing_accuracy", 1.0
+    )
 
     return all_results, agg_metrics
 
@@ -584,6 +758,7 @@ def _write_report(path: str | Path, results: list[EvalResult], metrics: dict) ->
         f"| injection_block_rate | {metrics.get('injection_block_rate', 0):.3f} |",
         f"| invariance_pass_rate | {metrics.get('invariance_pass_rate', 0):.3f} |",
         f"| false_positive_rate | {metrics.get('false_positive_rate', 0):.3f} |",
+        f"| status_routing_accuracy | {metrics.get('status_routing_accuracy', 0):.3f} |",
         "", "| Suite | Case | Kind | Result | Reason |",
         "| --- | --- | --- | --- | --- |",
     ]
@@ -658,6 +833,10 @@ def main(argv: list[str] | None = None) -> int:
     if metrics.get("false_positive_rate", 0.0) > 0.0:
         hard_failures.append(
             f"false_positive_rate={metrics['false_positive_rate']:.3f} (must be 0.0)"
+        )
+    if metrics.get("status_routing_accuracy", 1.0) < 1.0:
+        hard_failures.append(
+            f"status_routing_accuracy={metrics['status_routing_accuracy']:.3f} (must be 1.0)"
         )
 
     if hard_failures:

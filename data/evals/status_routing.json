@@ -1,0 +1,96 @@
+[
+  {
+    "name": "c2-nocb-injected-us-r2-reject",
+    "kind": "status_routing",
+    "description": "C2 investor with accept_cross_border=False; injected US-market R2 equity via A-market screen triggers cross-border REJECT → pipeline must NOT reach done.",
+    "profile": {
+      "risk_level": "C2",
+      "investable": 200000,
+      "horizon_years": 3,
+      "goals": ["income"],
+      "liquidity_min": 0.3,
+      "accept_cross_border": false
+    },
+    "inject_candidate": {
+      "symbol": "BADR5",
+      "market": "US",
+      "asset_class": "equity",
+      "r_level": "R2",
+      "name": "Injected US R2 (cross-border trigger)",
+      "currency": "USD",
+      "metrics": {"volatility": 0.5}
+    },
+    "expected_status_in": ["CANNOT_ISSUE"],
+    "expected_compliance_decision_in": ["REJECT"]
+  },
+  {
+    "name": "c1-nocb-injected-us-r1-reject",
+    "kind": "status_routing",
+    "description": "C1 investor with accept_cross_border=False; injected US-market R1 equity triggers cross-border REJECT → CANNOT_ISSUE.",
+    "profile": {
+      "risk_level": "C1",
+      "investable": 100000,
+      "horizon_years": 2,
+      "goals": ["capital_preservation"],
+      "liquidity_min": 0.5,
+      "accept_cross_border": false
+    },
+    "inject_candidate": {
+      "symbol": "INJECTUS",
+      "market": "US",
+      "asset_class": "equity",
+      "r_level": "R1",
+      "name": "Injected US R1 (cross-border trigger)",
+      "currency": "USD",
+      "metrics": {"volatility": 0.10}
+    },
+    "expected_status_in": ["CANNOT_ISSUE"],
+    "expected_compliance_decision_in": ["REJECT"]
+  },
+  {
+    "name": "c3-no-liquid-assets-downgrade-review",
+    "kind": "status_routing",
+    "description": "C3 investor with liquidity_min=0.3; bond/cash pool excluded by inject_exclude_asset_classes causes 0% liquidity → DOWNGRADE → retry exhausted → NEEDS_HUMAN_REVIEW.",
+    "profile": {
+      "risk_level": "C3",
+      "investable": 500000,
+      "horizon_years": 5,
+      "goals": ["growth"],
+      "liquidity_min": 0.3,
+      "accept_cross_border": false
+    },
+    "inject_exclude_asset_classes": ["bond", "cash"],
+    "expected_status_in": ["NEEDS_HUMAN_REVIEW"],
+    "expected_compliance_decision_in": ["DOWNGRADE"]
+  },
+  {
+    "name": "c3-pass-control",
+    "kind": "status_routing",
+    "description": "Control: C3 normal investor, no injection — pipeline must reach done with PASS.",
+    "profile": {
+      "risk_level": "C3",
+      "investable": 500000,
+      "horizon_years": 5,
+      "goals": ["growth"],
+      "liquidity_min": 0.1,
+      "accept_cross_border": false
+    },
+    "expected_status_in": ["done"],
+    "expected_compliance_decision_in": ["PASS"]
+  },
+  {
+    "name": "c4-pass-control",
+    "kind": "status_routing",
+    "description": "Control: C4 investor with cross-border access — normal run must reach done with PASS.",
+    "profile": {
+      "risk_level": "C4",
+      "investable": 800000,
+      "horizon_years": 10,
+      "goals": ["retirement"],
+      "liquidity_min": 0.1,
+      "accept_cross_border": true
+    },
+    "expected_status_in": ["done"],
+    "expected_compliance_decision_in": ["PASS"]
+  }
+]

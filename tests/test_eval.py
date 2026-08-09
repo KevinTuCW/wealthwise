@@ -298,6 +298,12 @@ def robustness_results():
     return results, metrics
 
 
+@pytest.fixture(scope="module")
+def status_routing_results():
+    results, metrics = run_eval("data/evals/status_routing.json")
+    return results, metrics
+
+
 class TestGoldenSuiteGates:
     def test_all_golden_cases_pass(self, golden_results):
         results, metrics = golden_results
@@ -385,6 +391,77 @@ class TestRobustnessSuiteHardGates:
         )
 
 
+class TestStatusRoutingSuiteHardGate:
+    """HARD GATE: status_routing_accuracy must be 1.0.
+
+    This suite verifies that the pipeline correctly routes non-PASS compliance
+    decisions to the appropriate terminal status (CANNOT_ISSUE for REJECT,
+    NEEDS_HUMAN_REVIEW for exhausted DOWNGRADE).  If reflection→finalize or the
+    REJECT/DOWNGRADE routing regresses, this gate catches it.
+    """
+
+    def test_status_routing_accuracy_is_one(self, status_routing_results):
+        """HARD GATE: every status-routing case must hit the expected pipeline status."""
+        _, metrics = status_routing_results
+        assert metrics["status_routing_accuracy"] == 1.0, (
+            f"HARD GATE FAILED: status_routing_accuracy="
+            f"{metrics['status_routing_accuracy']:.3f} (must be 1.0)"
+        )
+
+    def test_all_status_routing_cases_pass(self, status_routing_results):
+        results, _ = status_routing_results
+        failures = [r for r in results if not r.passed]
+        assert failures == [], (
+            f"Status-routing suite failures: {[(r.name, r.reason) for r in failures]}"
+        )
+
+    def test_reject_cases_produce_cannot_issue(self, status_routing_results):
+        """Injected cross-border cases must end in CANNOT_ISSUE (REJECT path)."""
+        results, _ = status_routing_results
+        reject_cases = [r for r in results if "reject" in r.name]
+        assert reject_cases, "Expected at least one REJECT case in status_routing suite"
+        for r in reject_cases:
+            assert r.passed, f"REJECT case {r.name!r} did not route to CANNOT_ISSUE: {r.reason}"
+
+    def test_downgrade_case_produces_needs_human_review(self, status_routing_results):
+        """Liquidity-breach DOWNGRADE case must end in NEEDS_HUMAN_REVIEW."""
+        results, _ = status_routing_results
+        downgrade_cases = [r for r in results if "downgrade" in r.name]
+        assert downgrade_cases, "Expected at least one DOWNGRADE case in status_routing suite"
+        for r in downgrade_cases:
+            assert r.passed, (
+                f"DOWNGRADE case {r.name!r} did not route to NEEDS_HUMAN_REVIEW: {r.reason}"
+            )
+
+    def test_status_routing_gate_fails_on_wrong_expectation(self):
+        """Verify the gate would fail if a case had a wrong expected_status_in.
+
+        Uses a tiny inline fixture that flips the expected status for a REJECT case
+        to ['done'], then asserts the metric drops below 1.0.
+        """
+        import json
+        from pathlib import Path
+        from wealthwise.eval import _run_status_routing
+
+        # Load and mutate just the first REJECT case to expect the wrong status
+        raw = json.loads(Path("data/evals/status_routing.json").read_text())
+        # Find a case that expects CANNOT_ISSUE and flip it to done (wrong)
+        mutated = []
+        flipped = False
+        for case in raw:
+            c = dict(case)
+            if not flipped and "CANNOT_ISSUE" in c.get("expected_status_in", []):
+                c["expected_status_in"] = ["done"]  # deliberately wrong
+                flipped = True
+            mutated.append(c)
+
+        assert flipped, "Could not find a CANNOT_ISSUE case to mutate"
+        _, metrics = _run_status_routing(mutated, "status_routing_test")
+        assert metrics["status_routing_accuracy"] < 1.0, (
+            "Expected accuracy to drop when a REJECT case is given a wrong expected status"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Section 3 — End-to-end: main([]) must exit 0
 # ---------------------------------------------------------------------------
@@ -394,7 +471,7 @@ from wealthwise.eval import main  # noqa: E402
 
 class TestMainExitsZero:
     def test_main_all_suites_exit_zero(self):
-        """main([]) runs all suites and must return 0 (all gates pass)."""
+        """main([]) runs all suites (including status_routing) and must return 0."""
         try:
             code = main([])
         except SystemExit as e:
@@ -408,6 +485,16 @@ class TestMainExitsZero:
         except SystemExit as e:
             code = e.code
         assert code == 0, f"main(['--suite', 'golden']) returned exit code {code}"
+
+    def test_main_single_suite_status_routing_exit_zero(self):
+        """main(['--suite', 'status_routing', '--min-cases', '5']) must exit 0."""
+        try:
+            code = main(["--suite", "status_routing", "--min-cases", "5"])
+        except SystemExit as e:
+            code = e.code
+        assert code == 0, (
+            f"main(['--suite', 'status_routing']) returned exit code {code} (expected 0)"
+        )
 
     def test_main_min_cases_too_high_exits_three(self):
         """main with --min-cases exceeding total must exit 3."""

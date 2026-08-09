@@ -138,6 +138,20 @@
     .expert-card h3 { margin: 0 0 8px; font-size: 13px; color: var(--accent); }
     .kv-row { display: flex; gap: 6px; margin-bottom: 3px; font-size: 12px; }
     .kv-k { color: var(--muted); min-width: 90px; }
+    #advisory-halt {
+      display: none;
+      grid-column: 1 / -1;
+      border: 2px solid var(--danger);
+      border-radius: 8px;
+      background: #fff1f2;
+      padding: 14px 18px;
+      margin-bottom: 0;
+    }
+    #advisory-halt .halt-title {
+      font-size: 15px; font-weight: 700; color: var(--danger); margin-bottom: 6px;
+    }
+    #advisory-halt .halt-body { font-size: 13px; color: #7f1d1d; }
+    .panel-dimmed { opacity: 0.35; pointer-events: none; user-select: none; }
     @media (max-width: 860px) {
       main { grid-template-columns: 1fr; padding: 10px; }
       header { padding: 12px; }
@@ -146,6 +160,13 @@
   </style>
 </head>
 <body>
+  <div id="demo-disclaimer" style="
+    position: sticky; top: 0; z-index: 20;
+    background: #fef3c7; border-bottom: 1px solid #fbbf24;
+    padding: 6px 24px; font-size: 12px; font-weight: 600; color: #92400e;
+    text-align: center; letter-spacing: 0.03em;">
+    仅供学习演示 · 非投资建议 · 非真实合规系统
+  </div>
   <header>
     <h1>WealthWise Workbench <span style="font-weight:400;font-size:14px;color:var(--muted)">金融投顾多 Agent 工作台</span></h1>
     <form id="run-form">
@@ -187,7 +208,11 @@
   </header>
   <div id="status-bar">就绪 — 填写投资者画像后点击"运行"</div>
   <main>
-    <section>
+    <div id="advisory-halt">
+      <div class="halt-title">⚠ 本次投顾建议无法出具 — 需要人工审核</div>
+      <div class="halt-body" id="halt-detail"></div>
+    </div>
+    <section id="alloc-section">
       <h2><span class="panel-tag tag-alloc">ALLOC</span> 资产配置</h2>
       <div class="body">
         <div class="kpis" id="alloc-kpis"></div>
@@ -372,23 +397,46 @@
         `<div class="kpi"><div class="klabel">${esc(k)}</div><div class="kvalue">${esc(v)}</div></div>`
       ).join("");
 
+      // Offline mode disclaimer: surface when the backend signals no real token billing
+      const offlineNote = cost.note
+        ? `<div style="margin-top:8px;padding:6px 10px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;font-size:12px;color:#0c4a6e">${esc(cost.note)}</div>`
+        : "";
+
       const timings = cost.node_timings || [];
       const log = timings.map((t) =>
         `<div class="node-entry"><span class="node-name">${esc(t.node)}</span> — ${fmt(t.latency_s, 3)}s</div>`
       ).join("");
-      byId("pipeline-log").innerHTML = log
+      byId("pipeline-log").innerHTML = offlineNote + (log
         ? `<div class="node-log" style="margin-top:10px">${log}</div>`
-        : "";
+        : "");
     }
 
     // ---- Full dashboard render ----
     function renderDashboard(data) {
+      const status = data.status || "";
+      const isIssued = status === "done";
+
+      // Advisory halt banner: show for any non-done terminal status
+      const haltEl = byId("advisory-halt");
+      const allocSection = byId("alloc-section");
+      if (!isIssued && status) {
+        haltEl.style.display = "block";
+        byId("halt-detail").textContent =
+          `管线状态: ${status} — 投顾建议未能出具，请人工审核。合规结论: ` +
+          (data.compliance?.compliance_decision || data.compliance?.decision || "—");
+        // Grey-out the allocation panel so weights are not presented as actionable
+        allocSection.classList.add("panel-dimmed");
+      } else {
+        haltEl.style.display = "none";
+        allocSection.classList.remove("panel-dimmed");
+      }
+
       if (data.allocation) renderAlloc(data.allocation);
       if (data.experts)    renderExperts(data.experts);
       if (data.crosscheck) renderCrosscheck(data.crosscheck);
       if (data.compliance) renderCompliance(data.compliance);
       if (data.cost)       renderCost(data.cost);
-      setStatus(`完成 — 状态: ${data.status || "—"}`);
+      setStatus(`完成 — 状态: ${status || "—"}`);
     }
 
     function collectProfile() {

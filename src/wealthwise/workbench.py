@@ -248,7 +248,13 @@ def _build_compliance_panel(state: AdvisoryState) -> dict:
 
 
 def _build_cost_panel(state: AdvisoryState, settings) -> dict:
-    """Panel 5: tokens_used, cost_usd, node latency/count from trace_events."""
+    """Panel 5: tokens_used, cost_usd, node latency/count from trace_events.
+
+    When tokens_used == 0 (offline / sample-provider mode), no real LLM calls were
+    made and cost tracking is not meaningful.  A ``note`` field is included so the
+    UI can surface an honest offline disclaimer rather than showing $0.00000 as if
+    it were a real cost measurement.
+    """
     tokens = state.tokens_used
     cost = _cost_usd(tokens, settings)
 
@@ -269,7 +275,7 @@ def _build_cost_panel(state: AdvisoryState, settings) -> dict:
     node_names = [e.get("node", "") for e in state.trace_events if e.get("node")]
     unique_nodes = list(dict.fromkeys(node_names))  # ordered dedup
 
-    return {
+    panel: dict = {
         "tokens_used": tokens,
         "cost_usd": cost,
         "budget_spent": state.budget_spent,
@@ -278,6 +284,15 @@ def _build_cost_panel(state: AdvisoryState, settings) -> dict:
         "node_timings": node_timings,
         "trace_event_count": len(state.trace_events),
     }
+
+    # Offline mode: tokens_used == 0 means no real provider was called.
+    # Surface a note so the UI does not present $0.00000 as a real cost figure.
+    if tokens == 0:
+        panel["note"] = (
+            "离线模式无真实 token 计费；真实 Provider 模式下才有费用"
+        )
+
+    return panel
 
 
 # ---------------------------------------------------------------------------
@@ -320,10 +335,20 @@ def sse_events(profile: InvestorProfile | None, deps: AdvisoryDeps,
       - "start"    — immediately, carrying the profile summary.
       - "node"     — once per LangGraph node as it completes; carries node
                      name + state patch.
-      - "complete" — final event, carrying the full five-panel dashboard.
+      - "complete" — final event, carrying the full five-panel dashboard built from
+                     the FULLY accumulated final state (accurate trace_event_count,
+                     cost, and all list fields).
 
     Each event is formatted as:  event: <name>\\ndata: <json>\\n\\n
     (matching shopscout's SSE framing exactly).
+
+    Implementation note: per-node patches are streamed for real-time UI animation,
+    but the complete-event dashboard is built by invoking the pipeline a second time
+    (graph.invoke) so that all list fields (trace_events, notes, candidates) are
+    fully accumulated rather than replaced by the last patch.  The two invocations
+    are deterministic given the same deps (offline mode).  In real-provider mode the
+    second invoke produces an independent run — callers should be aware of this if
+    auditability of the exact streamed run matters more than completeness.
     """
     if settings is None:
         from wealthwise.config import get_settings
@@ -342,19 +367,18 @@ def sse_events(profile: InvestorProfile | None, deps: AdvisoryDeps,
 
     yield _sse("start", {"profile": profile_desc})
 
-    # Accumulate state patches so we can reconstruct the final state
-    state_data = initial.model_dump()
-
+    # Stream per-node progress events for UI animation
     for update in graph.stream(initial, stream_mode="updates"):
         for node, patch in update.items():
             payload = {"node": node, **_safe_patch(patch)}
             yield _sse("node", payload)
-            # Merge patch into state_data (handle list fields by replacement)
-            if isinstance(patch, dict):
-                state_data.update(patch)
 
-    # Reconstruct final state from accumulated patches
-    final = AdvisoryState.model_validate(state_data)
+    # Obtain the fully accumulated final state via a complete invoke so that
+    # list fields (trace_events, notes, equity_candidates…) are correctly
+    # accumulated — simple dict.update() on patches would replace lists rather
+    # than appending them, producing inaccurate trace_event_count and cost totals.
+    from wealthwise.runner import run_advisory
+    final = run_advisory(profile, deps)
     yield _sse("complete", build_dashboard(final, settings))
 
 

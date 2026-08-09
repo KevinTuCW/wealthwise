@@ -7,3 +7,4 @@ __pycache__/
 *.new
 *.db
 .pytest_cache/
+data/evals/report.md

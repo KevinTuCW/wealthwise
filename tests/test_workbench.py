@@ -233,6 +233,15 @@ class TestBuildDashboard:
     def test_cost_trace_event_count(self):
         assert self.dash["cost"]["trace_event_count"] == len(self.state.trace_events)
 
+    def test_cost_no_offline_note_when_tokens_nonzero(self):
+        """When tokens_used > 0, no offline note should be present."""
+        cost = self.dash["cost"]
+        # Fixture has tokens_used=1200 — should NOT carry the offline note
+        assert cost["tokens_used"] == 1200
+        assert "note" not in cost, (
+            f"Offline note should not appear when tokens_used > 0, got: {cost.get('note')}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # sse_events — offline streaming
@@ -351,3 +360,67 @@ class TestBuildDashboardLive:
 
     def test_cost_tokens_consistent(self):
         assert self.dash["cost"]["tokens_used"] == self.state.tokens_used
+
+    def test_cost_offline_note_present_when_tokens_zero(self):
+        """I3: when tokens_used == 0 (offline mode), cost panel must carry offline note."""
+        # Offline pipeline produces tokens_used=0 (no real LLM calls)
+        assert self.state.tokens_used == 0, (
+            f"Offline pipeline should have tokens_used=0, got {self.state.tokens_used}"
+        )
+        cost = self.dash["cost"]
+        assert "note" in cost, "Cost panel must include 'note' key when tokens_used == 0"
+        assert "离线" in cost["note"] or "offline" in cost["note"].lower(), (
+            f"Offline note should mention offline mode: {cost['note']!r}"
+        )
+
+
+class TestSseEventsFinalStateAccuracy:
+    """M2: verify SSE complete event dashboard matches direct run_advisory."""
+
+    def test_complete_event_trace_count_matches_direct_run(self):
+        """The SSE complete-event dashboard must reflect the fully accumulated state.
+
+        Specifically: trace_event_count in the SSE complete dashboard should match
+        what a direct run_advisory call produces (both invoke the full pipeline).
+        """
+        from wealthwise.runner import run_advisory
+
+        profile = _c3_profile()
+        deps = build_sample_deps()
+        settings = get_settings()
+
+        # Direct run for reference
+        direct_state = run_advisory(profile, deps)
+        direct_dash = build_dashboard(direct_state, settings)
+
+        # SSE streaming run
+        events = list(sse_events(profile, deps, settings))
+        complete_event = next(e for e in events if e.startswith("event: complete"))
+        data_line = next(l for l in complete_event.splitlines() if l.startswith("data:"))
+        sse_dash = json.loads(data_line[len("data: "):])
+
+        # The SSE complete dashboard must have the same trace_event_count
+        # as the direct run (both are full pipeline invocations, same deps).
+        sse_count = sse_dash["cost"]["trace_event_count"]
+        direct_count = direct_dash["cost"]["trace_event_count"]
+        assert sse_count == direct_count, (
+            f"SSE complete trace_event_count={sse_count} != "
+            f"direct run trace_event_count={direct_count}; "
+            "SSE final state may be using accumulated patches instead of full invoke"
+        )
+
+    def test_complete_event_status_matches_direct_run(self):
+        """SSE complete status must match the direct pipeline status."""
+        from wealthwise.runner import run_advisory
+
+        profile = _c3_profile()
+        deps = build_sample_deps()
+        settings = get_settings()
+
+        direct_state = run_advisory(profile, deps)
+        events = list(sse_events(profile, deps, settings))
+        complete_event = next(e for e in events if e.startswith("event: complete"))
+        data_line = next(l for l in complete_event.splitlines() if l.startswith("data:"))
+        sse_dash = json.loads(data_line[len("data: "):])
+
+        assert sse_dash["status"] == direct_state.status

@@ -20,8 +20,8 @@ jobs:
           .venv/bin/pip install -e '.[dev,llm]'
       - name: Tests (offline, hermetic)
         run: PYTHONPATH=src .venv/bin/python -m pytest -q
-      - name: Eval gate (53 cases, hard gates)
-        run: PYTHONPATH=src .venv/bin/python -m wealthwise.eval
+      - name: Eval gate (58 cases, hard gates)
+        run: PYTHONPATH=src .venv/bin/python -m wealthwise.eval --min-cases 58
       - name: Publish eval report
         if: always()
         uses: actions/upload-artifact@v4

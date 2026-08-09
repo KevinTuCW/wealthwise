@@ -117,18 +117,31 @@ class SqliteRunStore:
             )
         return record.run_id
 
-    def _query(self, where: str, params: tuple) -> list[RunRecord]:
+    def _list_all(self, limit: int) -> list[RunRecord]:
+        """Fetch the most recent *limit* records ordered newest-first."""
         with self._conn() as c:
             rows = c.execute(
-                f"SELECT {','.join(_COLUMNS)} FROM runs {where}", params
+                f"SELECT {','.join(_COLUMNS)} FROM runs "
+                f"ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [self._row(r) for r in rows]
+
+    def _get_by_id(self, run_id: str) -> list[RunRecord]:
+        """Fetch zero or one record by primary key."""
+        with self._conn() as c:
+            rows = c.execute(
+                f"SELECT {','.join(_COLUMNS)} FROM runs "
+                f"WHERE run_id = ?",
+                (run_id,),
             ).fetchall()
         return [self._row(r) for r in rows]
 
     def list(self, limit: int = 50) -> list[RunRecord]:
-        return self._query("ORDER BY created_at DESC LIMIT ?", (limit,))
+        return self._list_all(limit)
 
     def get(self, run_id: str) -> RunRecord | None:
-        rows = self._query("WHERE run_id = ?", (run_id,))
+        rows = self._get_by_id(run_id)
         return rows[0] if rows else None
 
     @staticmethod
@@ -149,14 +162,13 @@ class SqliteRunStore:
 def build_run_store(settings) -> RunStore:
     """Build the RunStore from settings.run_store.
 
-    "sqlite"   → SqliteRunStore at settings.run_store_path (if present) or a
-                 default local path.
+    "sqlite"   → SqliteRunStore at settings.run_store_path.
     "memory"   → InMemoryRunStore (default).
     "postgres" → NotImplementedError (reserved).
     """
     backend = getattr(settings, "run_store", "memory")
     if backend == "sqlite":
-        path = getattr(settings, "run_store_path", "data/runs.db")
+        path = settings.run_store_path
         return SqliteRunStore(path)
     if backend == "postgres":
         raise NotImplementedError("Postgres RunStore not yet implemented")

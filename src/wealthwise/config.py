@@ -48,6 +48,7 @@ class Settings(BaseSettings):
 
     # --- persistence ---
     run_store: str = "memory"               # "memory" | "sqlite" — run/audit persistence
+    run_store_path: str = "data/runs.db"    # SQLite file path (used when run_store="sqlite")
 
     @property
     def tracing_enabled(self) -> bool:
