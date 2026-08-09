@@ -1,0 +1,19 @@
+services:
+  wealthwise:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - USE_REAL_PROVIDERS=false
+    # for live data + keyed providers, provide a .env and uncomment:
+    # env_file: .env
+    # depends_on: [db]
+
+  # Optional Postgres for run/audit persistence (RUN_STORE=postgres + DATABASE_URL).
+  # db:
+  #   image: postgres:16
+  #   environment:
+  #     POSTGRES_USER: wealthwise
+  #     POSTGRES_PASSWORD: wealthwise
+  #     POSTGRES_DB: wealthwise
+  #   ports: ["5432:5432"]

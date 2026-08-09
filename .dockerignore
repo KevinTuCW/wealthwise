@@ -1,0 +1,13 @@
+.venv/
+.git/
+.github/
+__pycache__/
+**/__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+tests/
+.pytest_cache/
+*.db
+data/evals/report.md
