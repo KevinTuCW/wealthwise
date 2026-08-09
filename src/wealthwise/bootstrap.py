@@ -31,31 +31,53 @@ class OfflineJuryClient:
 
         Heuristics (in priority order):
         - Compliance labels ["PASS", "DOWNGRADE", "REJECT"]:
-            → REJECT if text mentions cross-border violation + C1/C2
-            → DOWNGRADE if text mentions downgrade or mismatch
+            → REJECT if user content signals cross-border violation, C1/C2 + R5,
+              etc.  NOTE: we match only against the *user* portion so that
+              instruction words in the system prompt (e.g. "REJECTED") do NOT
+              accidentally trigger REJECT on every call.
+            → DOWNGRADE if user content signals mismatch / de-risk needed
             → PASS otherwise
         - Macro/equity tilt labels ["overweight", "neutral", "underweight"]:
             → neutral (safe default)
         - Fallback: first label in the set.
         """
-        text = f"{system}\n{user}".lower()
+        # Match REJECT/DOWNGRADE triggers against the user content ONLY so that
+        # instruction text in the system prompt (e.g. "REJECTED") cannot satisfy
+        # the heuristic and cause every compliance call to return REJECT.
+        user_lower = user.lower()
 
         if set(labels) == {"PASS", "DOWNGRADE", "REJECT"}:
-            # Compliance judgment
-            if any(t in text for t in ("reject", "cross-border violation",
-                                       "r5", "c1", "c2", "exceed", "prohibited")):
+            # Compliance judgment — check user content only.
+            # "Suitability check: REJECT/DOWNGRADE" in the user prompt is the most
+            # reliable signal.  We also check specific violation keywords.
+            suitability_line = ""
+            for line in user.splitlines():
+                if "suitability check:" in line.lower():
+                    suitability_line = line.lower()
+                    break
+
+            if (
+                "suitability check: reject" in suitability_line
+                or any(t in user_lower for t in ("cross-border violation",
+                                                  "unauthorized: ", "prohibited"))
+            ):
                 label = "REJECT"
-            elif any(t in text for t in ("downgrade", "mismatch", "unsuitable",
-                                          "too risky", "above ceiling")):
+            elif (
+                "suitability check: downgrade" in suitability_line
+                or any(t in user_lower for t in ("downgrade", "mismatch",
+                                                  "unsuitable", "too risky",
+                                                  "above ceiling", "shortfall:"))
+            ):
                 label = "DOWNGRADE"
             else:
                 label = "PASS"
 
         elif labels == ["overweight", "neutral", "underweight"]:
-            # Macro tilt judgment
-            if "underweight" in text or "bear" in text or "recession" in text:
+            # Macro tilt judgment — use combined system+user for context
+            combined = f"{system}\n{user}".lower()
+            if "underweight" in combined or "bear" in combined or "recession" in combined:
                 label = "underweight"
-            elif "overweight" in text or "bull" in text:
+            elif "overweight" in combined or "bull" in combined:
                 label = "overweight"
             else:
                 label = "neutral"

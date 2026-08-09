@@ -293,6 +293,12 @@ def _make_reflection_node(deps: AdvisoryDeps):
 
 def _make_explanation_node():
     """Deterministic template: compose the human-readable advisory explanation."""
+
+    # Terminal statuses that must not be overwritten with 'done'.
+    _TERMINAL_REVIEW_STATUSES = frozenset({
+        "NEEDS_HUMAN_REVIEW", "CANNOT_ISSUE", "GUARDRAIL_BLOCKED", "BUDGET_EXCEEDED",
+    })
+
     @traced("wealthwise.node.explanation")
     def node(state: AdvisoryState) -> dict:
         profile = state.profile
@@ -314,7 +320,13 @@ def _make_explanation_node():
 
             risk_ceiling = gc.get("risk_ceiling", portfolio.portfolio_r_level)
             decision = compliance.decision if compliance else "N/A"
-            disclosures_text = " ".join(compliance.disclosures) if compliance else ""
+
+            # Compose disclosures from the real compliance output (not static strings).
+            # This ensures the output guard validates substantive compliance disclosures.
+            disclosures_text = (
+                "\n".join(compliance.disclosures) if compliance and compliance.disclosures
+                else "不构成投资建议。"
+            )
 
             explanation = (
                 f"根据您的风险承受等级（{profile.risk_level}）和投资目标，"
@@ -323,9 +335,7 @@ def _make_explanation_node():
                 f"主要持仓：{alloc_lines}。\n"
                 f"投资组合境外敞口：{portfolio.fx_exposure:.1%}。\n"
                 f"合规审核结论：{decision}。\n"
-                f"{disclosures_text}\n"
-                "投资有风险，适当性匹配仅供参考，不构成投资建议。"
-                "请结合自身情况审慎决策。"
+                f"{disclosures_text}"
             )
             # Confidence: compliance confidence × portfolio sharpe proxy
             base_conf = compliance.confidence if compliance else 0.5
@@ -335,19 +345,19 @@ def _make_explanation_node():
         event = {"node": "explanation", "ts": time.time(),
                  "len_explanation": len(explanation), "confidence": confidence}
 
-        # Mandatory disclosure notes (required by output_guard.has_complete_disclosures)
-        # These keywords are checked by the output guard in state.notes:
-        #   适当性 / suitability, 风险 / risk, and 不构成投资建议 (in explanation)
-        disclosure_notes = [
-            "适当性匹配声明：本建议根据投资者 suitability 等级匹配生成，仅供参考。",
-            "风险披露（risk disclosure）：投资有风险，过往业绩不代表未来表现。",
-        ]
+        # Only advance status to 'done' if the current status is not already a
+        # terminal review/blocked status (e.g. NEEDS_HUMAN_REVIEW set by reflection
+        # when DOWNGRADE was exhausted).
+        new_status = (
+            state.status if state.status in _TERMINAL_REVIEW_STATUSES
+            else _STATUS_DONE
+        )
 
         return {
             "explanation": explanation,
             "confidence": confidence,
-            "status": _STATUS_DONE,
-            "notes": state.notes + disclosure_notes + [note],
+            "status": new_status,
+            "notes": state.notes + [note],
             "trace_events": state.trace_events + [event],
         }
     return node

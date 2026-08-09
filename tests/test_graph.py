@@ -205,8 +205,9 @@ class TestInputGuardBlock:
 
 class TestCrossBorderBlock:
     def test_no_cross_border_flag_limits_portfolio(self):
-        """accept_cross_border=False must result in no HK/US positions in portfolio,
-        OR the output guard must flag it for human review."""
+        """accept_cross_border=False must result in no HK/US positions in portfolio;
+        if the optimizer somehow placed cross-border assets, the output guard must
+        NOT let the advisory be issued as 'done' — it must be flagged."""
         from wealthwise.bootstrap import build_sample_deps
         from wealthwise.runner import run_advisory
 
@@ -216,7 +217,7 @@ class TestCrossBorderBlock:
         if result.portfolio is None:
             return  # blocked before portfolio — acceptable
 
-        # Either no HK/US candidates in portfolio OR status is flagged
+        # Determine cross-border weight from candidates
         all_candidates = list(result.equity_candidates) + list(result.fixedincome_candidates)
         symbol_market = {c.symbol: c.market for c in all_candidates}
         cross_border_weight = sum(
@@ -225,10 +226,11 @@ class TestCrossBorderBlock:
         )
 
         if cross_border_weight > 0:
-            # Output guard must have flagged it
-            assert result.status in ("NEEDS_HUMAN_REVIEW", "done"), (
+            # Must NOT be issued as 'done' — must be flagged for review
+            assert result.status in ("NEEDS_HUMAN_REVIEW", "CANNOT_ISSUE", "GUARDRAIL_BLOCKED"), (
                 f"Portfolio has cross-border weight={cross_border_weight:.2%} "
-                f"but status is {result.status!r}"
+                f"but status={result.status!r} — 'done' must not be issued "
+                "when cross-border assets are held without authorization"
             )
 
 
@@ -284,15 +286,19 @@ class TestReflectionLoop:
         )
 
     def test_reject_does_not_retry(self):
-        """A REJECT compliance decision must NOT trigger a retry loop."""
+        """A REJECT compliance decision must NOT trigger a retry loop.
+
+        Uses a very high liquidity_min (95%) which causes a marginal liquidity
+        shortfall → suitability returns DOWNGRADE → jury fires → FakeModelClient
+        forces REJECT → final decision is REJECT.  Reflection must route to
+        finalize (not loop back to portfolio).
+        """
         from wealthwise.agents.deps import AdvisoryDeps
         from wealthwise.bootstrap import build_sample_deps
         from wealthwise.agents.state import InvestorProfile
         from wealthwise.llm import FakeModelClient, Verdict
         from wealthwise.runner import run_advisory
 
-        # C1 profile that will get rejected by suitability when equity allocation is too high
-        # Force REJECT verdict from jury as well
         base_deps = build_sample_deps()
         reject_jury = [
             FakeModelClient("always-reject",
@@ -308,13 +314,35 @@ class TestReflectionLoop:
             embedder=base_deps.embedder,
             max_llm_judgments=12,
         )
-        # Use a normal profile; force REJECT outcome
-        result = run_advisory(_c4_profile(), reject_deps)
-        # Pipeline must terminate (not infinite loop)
-        assert result.status != "pending"
-        # compliance decision should be REJECT
-        if result.compliance is not None:
-            assert result.compliance.decision in {"PASS", "DOWNGRADE", "REJECT"}
+        # liquidity_min=0.95 causes a marginal liquidity shortfall → DOWNGRADE
+        # then FakeModelClient escalates to REJECT
+        strict_liq_profile = InvestorProfile(
+            risk_level="C4",
+            investable=1_000_000.0,
+            horizon_years=10,
+            goals=["growth"],
+            liquidity_min=0.95,  # near-certain liquidity floor breach
+            accept_cross_border=True,
+        )
+        result = run_advisory(strict_liq_profile, reject_deps)
+        # Pipeline must terminate — not stuck at pending
+        assert result.status != "pending", f"Pipeline stuck at status={result.status!r}"
+        # Must have produced a compliance verdict and it must be REJECT
+        assert result.compliance is not None, "Expected compliance verdict"
+        assert result.compliance.decision == "REJECT", (
+            f"Expected REJECT (jury escalated from DOWNGRADE), "
+            f"got {result.compliance.decision!r}"
+        )
+        # Status must be a terminal non-issued status (not 'done')
+        assert result.status in ("NEEDS_HUMAN_REVIEW", "CANNOT_ISSUE", "GUARDRAIL_BLOCKED",
+                                  "BUDGET_EXCEEDED"), (
+            f"REJECT outcome must not yield 'done'; got status={result.status!r}"
+        )
+        # Reflection must not have looped — at most one reflection trace event
+        reflection_events = [e for e in result.trace_events if e.get("node") == "reflection"]
+        assert len(reflection_events) <= 1, (
+            f"REJECT must not trigger retry; reflection fired {len(reflection_events)} times"
+        )
 
     def test_budget_guard_terminates_pipeline(self):
         """When max_llm_judgments is very low, pipeline must terminate with BUDGET_EXCEEDED
@@ -337,4 +365,77 @@ class TestReflectionLoop:
         result = run_advisory(_c4_profile(), tiny_budget_deps)
         assert result.status == "BUDGET_EXCEEDED", (
             f"Expected BUDGET_EXCEEDED with zero budget, got {result.status!r}"
+        )
+
+    def test_downgrade_exhausted_stays_review(self):
+        """I5: When reflection exhausts its retry (already_retried=True) and routes
+        to explanation with status=NEEDS_HUMAN_REVIEW, the explanation_node must
+        NOT overwrite that status with 'done'.
+
+        This tests the node-level invariant: explanation_node preserves terminal
+        review statuses rather than blindly promoting to 'done'.
+        """
+        from wealthwise.agents.state import (
+            AdvisoryState, ComplianceVerdict, InvestorProfile, PortfolioAllocation,
+        )
+        from wealthwise.agents.supervisor.graph import _make_explanation_node
+
+        # Build a state that mimics what reflection sets when DOWNGRADE exhausted:
+        # - status = NEEDS_HUMAN_REVIEW
+        # - compliance.decision = DOWNGRADE
+        profile = InvestorProfile(
+            risk_level="C4",
+            investable=1_000_000.0,
+            horizon_years=10,
+            goals=["growth"],
+            liquidity_min=0.10,
+            accept_cross_border=True,
+        )
+        portfolio = PortfolioAllocation(
+            weights={"600519.SH": 0.6, "519736.OF": 0.4},
+            class_weights={"equity": 0.6, "bond": 0.4},
+            portfolio_r_level="R3",
+            fx_exposure=0.0,
+        )
+        compliance = ComplianceVerdict(
+            decision="DOWNGRADE",
+            matched=False,
+            violations=["Liquidity shortfall: cash+bond 40% < required 50%"],
+            disclosures=[
+                "投资者风险等级 C4，组合风险等级 R3，不符合适当性匹配要求。",
+                "投资有风险，入市须谨慎，过往业绩不代表未来表现。",
+                "本内容不构成投资建议，仅供参考，请结合自身情况审慎决策。",
+            ],
+            confidence=0.9,
+        )
+        # Simulate post-reflection state: already_retried, DOWNGRADE exhausted,
+        # reflection set NEEDS_HUMAN_REVIEW and routed to explanation
+        state = AdvisoryState(
+            profile=profile,
+            portfolio=portfolio,
+            compliance=compliance,
+            status="NEEDS_HUMAN_REVIEW",  # set by reflection after exhaustion
+            goal_constraints={
+                "risk_ceiling": "R3",
+                "liquidity_min": 0.50,
+                "_reflection_retry": True,  # sentinel: already retried
+            },
+            notes=["__route__: explanation",
+                   "reflection_node: DOWNGRADE (already_retried) — flagging for human review"],
+            confidence=0.0,
+        )
+
+        # Run the explanation node directly
+        explanation_node = _make_explanation_node()
+        result = explanation_node(state)
+
+        # Status must stay NEEDS_HUMAN_REVIEW — not be overwritten with 'done'
+        new_status = result.get("status", state.status)
+        assert new_status == "NEEDS_HUMAN_REVIEW", (
+            f"explanation_node must preserve NEEDS_HUMAN_REVIEW status, "
+            f"but got status={new_status!r} (was overwritten with 'done')"
+        )
+        assert new_status != "done", (
+            "explanation_node must NOT overwrite NEEDS_HUMAN_REVIEW with 'done' "
+            "— DOWNGRADE-exhausted advisory must not be issued"
         )

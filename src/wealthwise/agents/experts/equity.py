@@ -22,6 +22,14 @@ _ALL_MARKETS = ["A", "HK", "US"]
 _PE_CAP_UNDERWEIGHT = 35.0
 _PE_CAP_DEFAULT = 9999.0   # effectively no PE filter
 
+# Conservative mode (C1/C2 profiles): tighter PE cap regardless of macro tilt.
+# This ensures the planner hint genuinely affects the candidate set.
+_PE_CAP_CONSERVATIVE = 25.0
+
+# Conservative mode: cap the number of equity candidates to keep the set small
+# and weighted toward lower-risk names.
+_MAX_CANDIDATES_CONSERVATIVE = 5
+
 
 def equity_node(state: AdvisoryState, deps) -> dict:
     """Screen equity candidates from market providers.
@@ -45,15 +53,27 @@ def equity_node(state: AdvisoryState, deps) -> dict:
     accept_cross_border = gc.get("accept_cross_border", True)
     ceiling_order = R_ORDER.get(risk_ceiling, 5)
 
+    # Consume conservative_mode planner hint (C1/C2 profiles).
+    hints = gc.get("planner_hints", {})
+    conservative_mode = hints.get("conservative_mode", False)
+
     # Determine markets to screen
     if accept_cross_border:
         markets = _ALL_MARKETS
     else:
         markets = ["A"]
 
-    # Determine PE filter from macro tilt
+    # Determine PE filter:
+    # - conservative_mode (C1/C2) → tightest cap regardless of tilt
+    # - underweight macro tilt    → moderate tighter cap
+    # - otherwise                 → no hard filter
     tilt = state.macro_view.get("tilt", "neutral") if state.macro_view else "neutral"
-    pe_cap = _PE_CAP_UNDERWEIGHT if tilt == "underweight" else _PE_CAP_DEFAULT
+    if conservative_mode:
+        pe_cap = _PE_CAP_CONSERVATIVE
+    elif tilt == "underweight":
+        pe_cap = _PE_CAP_UNDERWEIGHT
+    else:
+        pe_cap = _PE_CAP_DEFAULT
 
     # Screen from providers
     candidates: list[AssetCandidate] = []
@@ -72,18 +92,26 @@ def equity_node(state: AdvisoryState, deps) -> dict:
     # Filter by risk ceiling
     eligible = [c for c in candidates if R_ORDER.get(c.r_level, 5) <= ceiling_order]
 
+    # Conservative mode: further cap the candidate set size so downstream
+    # portfolio optimisation stays anchored to lower-risk names.
+    if conservative_mode and len(eligible) > _MAX_CANDIDATES_CONSERVATIVE:
+        eligible = eligible[:_MAX_CANDIDATES_CONSERVATIVE]
+
     event = {
         "node": "equity",
         "ts": time.time(),
         "markets": markets,
         "risk_ceiling": risk_ceiling,
         "tilt": tilt,
+        "conservative_mode": conservative_mode,
+        "pe_cap": pe_cap,
         "total_screened": len(candidates),
         "eligible": len(eligible),
     }
     note = (
         f"equity_node: screened {len(candidates)} candidates across {markets}; "
-        f"{len(eligible)} within {risk_ceiling} ceiling; macro_tilt={tilt}"
+        f"{len(eligible)} within {risk_ceiling} ceiling; macro_tilt={tilt}; "
+        f"conservative_mode={conservative_mode}; pe_cap={pe_cap}"
     )
 
     return {

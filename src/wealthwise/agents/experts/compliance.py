@@ -134,13 +134,22 @@ def compliance_node(state: AdvisoryState, deps) -> dict:
     final_decision = _stricter(base_verdict.decision, jury_decision)
 
     # ------------------------------------------------------------------
-    # Step 5: Build mandatory disclosures
+    # Step 5: Ensure all four mandatory disclosures are present.
+    #
+    # suitability.check_suitability already generates: suitability-match,
+    # risk disclosure, disclaimer, and a cross-border line.  When it does
+    # NOT include a cross-border FX disclosure (because accept_cross_border
+    # is True but the base disclosures don't include the 汇率 line yet),
+    # supplement with the substantive FX wording here.
     # ------------------------------------------------------------------
-    # Cross-border FX risk disclosure when portfolio holds non-CNY assets
-    if portfolio.fx_exposure > 0 and profile.accept_cross_border:
+    # If the portfolio actually holds FX exposure beyond what suitability
+    # captured (e.g. fx_exposure > 0 but accept_cross_border=True), append
+    # a quantified FX disclosure with 汇率 wording.
+    combined_disclosures = " ".join(disclosures)
+    if portfolio.fx_exposure > 0 and "汇率" not in combined_disclosures:
         disclosures.append(
-            f"本组合持有境外资产，汇率风险敞口约 {portfolio.fx_exposure:.1%}。"
-            "投资者须知跨境投资的外汇波动风险可能影响实际收益。"
+            f"本组合持有境外资产，汇率风险敞口约 {portfolio.fx_exposure:.1%}，"
+            "汇率波动可能影响实际收益，请注意跨境通道（港股通/QDII）与税收风险。"
         )
 
     # Final compliance verdict — confidence from deterministic suitability (1.0)

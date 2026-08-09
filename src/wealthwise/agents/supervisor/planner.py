@@ -34,6 +34,11 @@ _CONSERVATIVE_LEVELS = frozenset({"C1", "C2"})
 def plan(profile: InvestorProfile | None) -> list[str]:
     """Return the ordered list of expert node names for *profile*.
 
+    The graph topology is static (nodes always execute in this order); the
+    planner's value is in the ``build_planner_hints`` dict that it writes into
+    ``goal_constraints``, which downstream nodes (equity_node, goal_node) then
+    consume to tighten screening for conservative profiles.
+
     An empty/None profile signals that the input guard will block the pipeline;
     the returned plan is still the full order (the graph routes to END via the
     input guard node, so the plan is never executed).
@@ -46,13 +51,8 @@ def plan(profile: InvestorProfile | None) -> list[str]:
     Returns
     -------
     list[str]
-        Ordered expert node names.  Currently always returns the full order;
-        the key value is the planner_hints dict this function communicates to
-        the graph via goal_constraints updates.
+        Ordered expert node names (always the full static order).
     """
-    if profile is None:
-        return list(_FULL_ORDER)
-
     return list(_FULL_ORDER)
 
 

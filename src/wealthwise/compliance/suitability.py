@@ -211,13 +211,25 @@ def check_suitability(
         matched = False
 
     # ------------------------------------------------------------------
-    # Disclosures (always generated)
+    # Disclosures (always generated — four mandatory kinds)
     # ------------------------------------------------------------------
-    disclosures: list[str] = [
-        f"投资者风险等级 {c_level}，组合风险等级 {port_r}。"
-        + ("本组合符合适当性匹配要求。" if matched else "本组合存在适当性匹配问题，请审查违规项目。")
-    ]
-    if not profile.accept_cross_border:
+    # 1. Suitability-match statement naming C-level and R-level
+    suitability_stmt = (
+        f"投资者风险等级 {c_level}，组合风险等级 {port_r}，"
+        + ("符合适当性匹配要求。" if matched else "不符合适当性匹配要求，存在违规项目，请审查。")
+    )
+    disclosures: list[str] = [suitability_stmt]
+
+    # 2. Risk disclosure
+    disclosures.append("投资有风险，入市须谨慎，过往业绩不代表未来表现。")
+
+    # 3. Disclaimer
+    disclosures.append("本内容不构成投资建议，仅供参考，请结合自身情况审慎决策。")
+
+    # 4. Cross-border / FX disclosure (when investor accepts cross-border, or there is FX exposure)
+    if profile.accept_cross_border:
+        disclosures.append("跨境标的涉及汇率波动、通道（港股通/QDII）与税收风险。")
+    elif not profile.accept_cross_border:
         disclosures.append("投资者未授权跨境投资，组合不得持有境外资产。")
 
     return ComplianceVerdict(

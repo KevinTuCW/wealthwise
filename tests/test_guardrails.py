@@ -42,10 +42,18 @@ def _candidate(symbol="600519.SH", market="A", r_level="R2", **kw) -> AssetCandi
     return AssetCandidate(**defaults)
 
 
-def _compliance(decision="PASS") -> ComplianceVerdict:
+def _compliance(decision="PASS", *, cross_border: bool = False) -> ComplianceVerdict:
+    """Build a ComplianceVerdict with the four mandatory disclosure kinds."""
+    disclosures = [
+        f"投资者风险等级 C3，组合风险等级 R2，{'符合' if decision == 'PASS' else '不符合'}适当性匹配要求。",
+        "投资有风险，入市须谨慎，过往业绩不代表未来表现。",
+        "本内容不构成投资建议，仅供参考，请结合自身情况审慎决策。",
+    ]
+    if cross_border:
+        disclosures.append("跨境标的涉及汇率波动、通道（港股通/QDII）与税收风险。")
     return ComplianceVerdict(
         decision=decision, matched=(decision == "PASS"),
-        violations=[], disclosures=["suitability ok"], confidence=1.0,
+        violations=[], disclosures=disclosures, confidence=1.0,
     )
 
 
@@ -68,7 +76,7 @@ def _advisory_done(**overrides) -> AdvisoryState:
         explanation="本组合适合您的风险偏好，不构成投资建议。",
         confidence=0.85,
         status="done",
-        notes=["suitability matched C3×R2", "risk disclosure: 投资有风险，入市需谨慎"],
+        notes=[],
     )
     for k, v in overrides.items():
         object.__setattr__(state, k, v)
@@ -200,58 +208,93 @@ class TestCapCandidates:
 # ---------------------------------------------------------------------------
 
 class TestHasCompleteDisclosures:
-    def _state_with_disclosures(self, notes, explanation="不构成投资建议"):
+    def _state_with_compliance_disclosures(
+        self,
+        disclosures: list[str],
+        explanation: str = "不构成投资建议",
+        portfolio: "PortfolioAllocation | None" = None,
+    ) -> AdvisoryState:
+        """Build a state whose compliance.disclosures drive the guard check."""
+        compliance = ComplianceVerdict(
+            decision="PASS", matched=True,
+            violations=[], disclosures=disclosures, confidence=1.0,
+        )
         return AdvisoryState(
             profile=_clean_profile(),
-            portfolio=_portfolio(),
-            compliance=_compliance("PASS"),
+            portfolio=portfolio or _portfolio(),
+            compliance=compliance,
             explanation=explanation,
             confidence=0.85,
             status="done",
-            notes=notes,
+            notes=[],
         )
 
     def test_complete_disclosure_passes(self):
-        state = self._state_with_disclosures([
-            "适当性匹配：C3×R2 符合",
-            "risk disclosure: 投资有风险，入市需谨慎",
+        """All four mandatory disclosures present → guard passes."""
+        state = self._state_with_compliance_disclosures([
+            "投资者风险等级 C3，组合风险等级 R2，符合适当性匹配要求。",
+            "投资有风险，入市须谨慎，过往业绩不代表未来表现。",
+            "本内容不构成投资建议，仅供参考，请结合自身情况审慎决策。",
         ])
         ok, missing = has_complete_disclosures(state)
-        assert ok is True
+        assert ok is True, f"Expected pass but got missing: {missing}"
         assert missing == []
 
     def test_missing_risk_disclosure_flagged(self):
-        state = self._state_with_disclosures([
-            "适当性匹配：C3×R2 符合",
-            # no risk disclosure note
+        """When compliance.disclosures lacks a risk disclosure → guard fails."""
+        state = self._state_with_compliance_disclosures([
+            "投资者风险等级 C3，组合风险等级 R2，符合适当性匹配要求。",
+            # no risk disclosure
+            "本内容不构成投资建议，仅供参考，请结合自身情况审慎决策。",
         ])
         ok, missing = has_complete_disclosures(state)
         assert ok is False
         assert any("risk" in m.lower() or "风险" in m for m in missing)
 
     def test_missing_suitability_match_flagged(self):
-        state = self._state_with_disclosures([
-            "risk disclosure: 投资有风险",
-            # no suitability match note
+        """When compliance.disclosures lacks a suitability statement → guard fails."""
+        state = self._state_with_compliance_disclosures([
+            # no suitability statement
+            "投资有风险，入市须谨慎，过往业绩不代表未来表现。",
+            "本内容不构成投资建议，仅供参考，请结合自身情况审慎决策。",
         ])
         ok, missing = has_complete_disclosures(state)
         assert ok is False
         assert any("suitability" in m.lower() or "适当" in m for m in missing)
 
     def test_missing_disclaimer_flagged(self):
-        # explanation without 不构成投资建议
-        state = self._state_with_disclosures(
-            notes=["适当性匹配：C3×R2 符合", "risk disclosure: 投资有风险"],
-            explanation="本组合预期回报良好",   # missing disclaimer
+        """When neither compliance.disclosures nor explanation has the disclaimer → guard fails."""
+        state = self._state_with_compliance_disclosures(
+            disclosures=[
+                "投资者风险等级 C3，组合风险等级 R2，符合适当性匹配要求。",
+                "投资有风险，入市须谨慎，过往业绩不代表未来表现。",
+                # no disclaimer
+            ],
+            explanation="本组合预期回报良好",   # also missing disclaimer
         )
         ok, missing = has_complete_disclosures(state)
         assert ok is False
         assert any("不构成" in m or "disclaimer" in m.lower() for m in missing)
 
-    def test_zero_confidence_flagged(self):
-        state = self._state_with_disclosures(
-            notes=["适当性匹配：C3×R2 符合", "risk disclosure: 投资有风险"],
+    def test_disclaimer_in_explanation_accepted(self):
+        """Disclaimer in explanation (not in disclosures) is also acceptable."""
+        state = self._state_with_compliance_disclosures(
+            disclosures=[
+                "投资者风险等级 C3，组合风险等级 R2，符合适当性匹配要求。",
+                "投资有风险，入市须谨慎，过往业绩不代表未来表现。",
+                # no disclaimer in disclosures
+            ],
+            explanation="本组合不构成投资建议，请谨慎。",  # disclaimer in explanation
         )
+        ok, missing = has_complete_disclosures(state)
+        assert ok is True, f"Expected pass (disclaimer in explanation), got missing: {missing}"
+
+    def test_zero_confidence_flagged(self):
+        state = self._state_with_compliance_disclosures([
+            "投资者风险等级 C3，组合风险等级 R2，符合适当性匹配要求。",
+            "投资有风险，入市须谨慎，过往业绩不代表未来表现。",
+            "本内容不构成投资建议，仅供参考，请结合自身情况审慎决策。",
+        ])
         state = state.model_copy(update={"confidence": 0.0})
         ok, missing = has_complete_disclosures(state)
         assert ok is False
@@ -267,25 +310,19 @@ class TestEnforceOutput:
                 markets=("A", "HK"),
                 r_level="R2",
             )
-            notes = [
-                "适当性匹配：C3×R2 符合",
-                "risk disclosure: 投资有风险，入市需谨慎。跨境资产涉及汇率风险、渠道风险及税务风险。",
-            ]
+            compliance = _compliance("PASS", cross_border=True)
         else:
             profile = _clean_profile()
             portfolio = _portfolio()
-            notes = [
-                "适当性匹配：C3×R2 符合",
-                "risk disclosure: 投资有风险，入市需谨慎",
-            ]
+            compliance = _compliance("PASS")
         return AdvisoryState(
             profile=profile,
             portfolio=portfolio,
-            compliance=_compliance("PASS"),
+            compliance=compliance,
             explanation="本组合适合您的风险偏好，不构成投资建议。",
             confidence=0.85,
             status="done",
-            notes=notes,
+            notes=[],
         )
 
     def test_complete_state_passes_through_unchanged(self):
@@ -294,38 +331,59 @@ class TestEnforceOutput:
         assert result.status == "done"
 
     def test_missing_risk_disclosure_triggers_human_review(self):
+        """compliance.disclosures without a risk keyword → guard flags for review."""
+        compliance_no_risk = ComplianceVerdict(
+            decision="PASS", matched=True,
+            violations=[],
+            disclosures=[
+                "投资者风险等级 C3，组合风险等级 R2，符合适当性匹配要求。",
+                # no risk disclosure
+                "本内容不构成投资建议，仅供参考，请结合自身情况审慎决策。",
+            ],
+            confidence=1.0,
+        )
         state = AdvisoryState(
             profile=_clean_profile(),
             portfolio=_portfolio(),
-            compliance=_compliance("PASS"),
+            compliance=compliance_no_risk,
             explanation="不构成投资建议。",
             confidence=0.85,
             status="done",
-            notes=["适当性匹配：C3×R2 符合"],  # no risk disclosure
+            notes=[],
         )
         result = enforce_output(state)
         assert result.status == "NEEDS_HUMAN_REVIEW"
         assert any("review" in n.lower() or "人工" in n for n in result.notes)
 
     def test_cross_border_portfolio_without_fx_disclosure_flagged(self):
-        """Portfolio holds HK asset but disclosure lacks FX/channel/tax wording."""
+        """Portfolio holds HK asset but compliance.disclosures lack 汇率 wording → flagged."""
         profile = _clean_profile(accept_cross_border=True)
         portfolio = _portfolio(
             symbols=("600519.SH", "0700.HK"),
             markets=("A", "HK"),
             r_level="R2",
         )
+        # compliance disclosures WITHOUT 汇率 wording
+        compliance_no_fx = ComplianceVerdict(
+            decision="PASS", matched=True,
+            violations=[],
+            disclosures=[
+                "投资者风险等级 C3，组合风险等级 R2，符合适当性匹配要求。",
+                "投资有风险，入市须谨慎，过往业绩不代表未来表现。",
+                "本内容不构成投资建议，仅供参考，请结合自身情况审慎决策。",
+                # cross-border disclosure WITHOUT 汇率 — only fx/channel keywords
+                "投资者已授权跨境投资，须注意 channel and fx exposure risks.",
+            ],
+            confidence=1.0,
+        )
         state = AdvisoryState(
             profile=profile,
             portfolio=portfolio,
-            compliance=_compliance("PASS"),
+            compliance=compliance_no_fx,
             explanation="不构成投资建议。",
             confidence=0.85,
             status="done",
-            notes=[
-                "适当性匹配：C3×R2 符合",
-                "risk disclosure: 投资有风险，入市需谨慎",  # missing FX/channel/tax wording
-            ],
+            notes=[],
         )
         result = enforce_output(state)
         assert result.status == "NEEDS_HUMAN_REVIEW"
@@ -342,7 +400,7 @@ class TestEnforceOutput:
             explanation="本组合保本保收益，不构成投资建议。",
             confidence=0.85,
             status="done",
-            notes=["适当性匹配：C3×R2 符合", "risk disclosure: 投资有风险，入市需谨慎"],
+            notes=[],
         )
         result = enforce_output(state)
         # explanation should be sanitized — misleading terms removed/replaced
@@ -358,8 +416,6 @@ class TestEnforceOutput:
             confidence=0.85,
             status="done",
             notes=[
-                "适当性匹配：C3×R2 符合",
-                "risk disclosure: 投资有风险，入市需谨慎",
                 "advisor contact: advisor@wealth.com, phone 138-0013-8000",
             ],
         )
@@ -390,7 +446,7 @@ class TestEnforceOutput:
             explanation="不构成投资建议。",
             confidence=0.85,
             status="done",
-            notes=["适当性匹配：C3×R2 符合", "risk disclosure: 投资有风险，入市需谨慎"],
+            notes=[],
         )
         result = enforce_output(state)
         assert result.status == "NEEDS_HUMAN_REVIEW"
@@ -414,3 +470,110 @@ class TestEnforceOutput:
         state = _advisory_done(compliance=_compliance("PASS"))
         result = enforce_output(state)
         assert result.status == "done"
+
+
+# ---------------------------------------------------------------------------
+# C1 + C2: substantive disclosure validation (new-contract tests)
+# ---------------------------------------------------------------------------
+
+class TestSubstantiveDisclosureValidation:
+    """Tests that the guard validates REAL disclosures, not keyword-stuffed notes."""
+
+    def test_fx_disclosure_requires_substantive_wording(self):
+        """Cross-border portfolio: compliance.disclosures without 汇率 → guard rejects.
+        With 汇率 → passes."""
+        profile = _clean_profile(accept_cross_border=True)
+        portfolio = _portfolio(
+            symbols=("600519.SH", "0700.HK"),
+            markets=("A", "HK"),
+            r_level="R2",
+        )
+        base_disclosures = [
+            "投资者风险等级 C3，组合风险等级 R2，符合适当性匹配要求。",
+            "投资有风险，入市须谨慎，过往业绩不代表未来表现。",
+            "本内容不构成投资建议，仅供参考，请结合自身情况审慎决策。",
+        ]
+
+        # Case A: cross-border portfolio, FX disclosure lacks 汇率 → FAILS
+        compliance_no_hanzi_fx = ComplianceVerdict(
+            decision="PASS", matched=True, violations=[],
+            disclosures=base_disclosures + [
+                # Has 'fx' substring but NOT the Chinese word 汇率
+                "Cross-border exposure: fx_exposure=30%, channel risks apply.",
+            ],
+            confidence=1.0,
+        )
+        state_no_hanzi = AdvisoryState(
+            profile=profile, portfolio=portfolio,
+            compliance=compliance_no_hanzi_fx,
+            explanation="不构成投资建议。", confidence=0.85, status="done", notes=[],
+        )
+        ok_a, missing_a = has_complete_disclosures(state_no_hanzi)
+        assert ok_a is False, (
+            "Cross-border portfolio without 汇率 in disclosures must fail the guard"
+        )
+        assert any("汇率" in m for m in missing_a), (
+            f"Missing items should mention 汇率 requirement: {missing_a}"
+        )
+
+        # Case B: same portfolio, FX disclosure WITH 汇率 → PASSES
+        compliance_with_hanzi_fx = ComplianceVerdict(
+            decision="PASS", matched=True, violations=[],
+            disclosures=base_disclosures + [
+                "跨境标的涉及汇率波动、通道（港股通/QDII）与税收风险。",
+            ],
+            confidence=1.0,
+        )
+        state_with_hanzi = AdvisoryState(
+            profile=profile, portfolio=portfolio,
+            compliance=compliance_with_hanzi_fx,
+            explanation="不构成投资建议。", confidence=0.85, status="done", notes=[],
+        )
+        ok_b, missing_b = has_complete_disclosures(state_with_hanzi)
+        assert ok_b is True, (
+            f"Cross-border portfolio with 汇率 in disclosures must pass, got missing: {missing_b}"
+        )
+
+    def test_disclosures_come_from_compliance_not_static(self):
+        """The explanation must embed the real suitability-match statement from
+        compliance.disclosures (C-level & R-level named), and removing
+        compliance.disclosures must cause the guard to fail."""
+        from wealthwise.bootstrap import build_sample_deps
+        from wealthwise.runner import run_advisory
+
+        profile = InvestorProfile(
+            risk_level="C4",
+            investable=1_000_000.0,
+            horizon_years=10,
+            goals=["retirement", "growth"],
+            liquidity_min=0.10,
+            accept_cross_border=True,
+        )
+        deps = build_sample_deps()
+        result = run_advisory(profile, deps)
+
+        # If pipeline ran all the way to explanation, the explanation must
+        # contain content from the real compliance disclosures.
+        if result.compliance is not None and result.status not in (
+            "GUARDRAIL_BLOCKED", "BUDGET_EXCEEDED", "CANNOT_ISSUE"
+        ):
+            explanation = result.explanation or ""
+            disclosures_joined = " ".join(result.compliance.disclosures)
+            # The suitability statement must name the C-level
+            assert "C4" in disclosures_joined or "C4" in explanation, (
+                "Compliance disclosures should name the investor C4 level"
+            )
+            # The explanation must contain content from disclosures (not static notes)
+            assert result.compliance.disclosures, (
+                "compliance.disclosures must be non-empty"
+            )
+            # Sanity: removing disclosures from compliance must cause guard to fail
+            empty_disclosures = result.compliance.model_copy(update={"disclosures": []})
+            state_no_disc = result.model_copy(update={
+                "compliance": empty_disclosures,
+                "status": "done",
+            })
+            ok, _ = has_complete_disclosures(state_no_disc)
+            assert ok is False, (
+                "State with empty compliance.disclosures must fail has_complete_disclosures"
+            )

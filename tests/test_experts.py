@@ -294,6 +294,79 @@ class TestEquityNode:
         equity_node(state, deps)
         assert state.equity_candidates == original
 
+    def test_conservative_mode_tightens_equity(self, deps):
+        """I2: conservative_mode=True (C1/C2 profile) yields a stricter/smaller
+        equity candidate set than a C4 profile, all else equal.
+
+        The planner sets conservative_mode=True for C1/C2 which equity_node
+        consumes to apply a tighter PE cap AND a candidate count cap.
+        """
+        from wealthwise.agents.experts.equity import equity_node
+        from wealthwise.agents.supervisor.planner import build_planner_hints
+
+        # --- C4 profile (non-conservative) ---
+        c4_profile = InvestorProfile(
+            risk_level="C4",
+            investable=1_000_000.0,
+            horizon_years=10,
+            goals=["retirement", "growth"],
+            liquidity_min=0.10,
+            accept_cross_border=True,
+        )
+        c4_gc = {
+            "risk_ceiling": "R4",
+            "accept_cross_border": True,
+            "max_equity": 0.80,
+            "liquidity_min": 0.10,
+            "planner_hints": build_planner_hints(c4_profile),
+        }
+        c4_state = AdvisoryState(profile=c4_profile, goal_constraints=c4_gc)
+        c4_result = equity_node(c4_state, deps)
+        c4_candidates = c4_result["equity_candidates"]
+
+        # --- C1 profile (conservative) ---
+        c1_profile = InvestorProfile(
+            risk_level="C1",
+            investable=500_000.0,
+            horizon_years=3,
+            goals=["capital_preservation"],
+            liquidity_min=0.50,
+            accept_cross_border=True,  # same cross-border flag so market scope matches
+        )
+        c1_gc = {
+            "risk_ceiling": "R1",
+            "accept_cross_border": True,
+            "max_equity": 0.20,
+            "liquidity_min": 0.50,
+            "planner_hints": build_planner_hints(c1_profile),
+        }
+        c1_state = AdvisoryState(profile=c1_profile, goal_constraints=c1_gc)
+        c1_result = equity_node(c1_state, deps)
+        c1_candidates = c1_result["equity_candidates"]
+
+        # Verify conservative_mode is set for C1 but not C4
+        assert c1_gc["planner_hints"]["conservative_mode"] is True, (
+            "C1 profile must set conservative_mode=True"
+        )
+        assert c4_gc["planner_hints"]["conservative_mode"] is False, (
+            "C4 profile must set conservative_mode=False"
+        )
+
+        # Conservative mode must yield ≤ non-conservative candidate count
+        # (stricter PE cap and candidate cap apply)
+        assert len(c1_candidates) <= len(c4_candidates), (
+            f"C1 conservative_mode candidates ({len(c1_candidates)}) must be "
+            f"≤ C4 candidates ({len(c4_candidates)})"
+        )
+
+        # The conservative trace event must record conservative_mode=True
+        equity_events = [e for e in c1_result["trace_events"]
+                         if e.get("node") == "equity"]
+        if equity_events:
+            assert equity_events[-1].get("conservative_mode") is True, (
+                "Equity trace event must record conservative_mode=True for C1"
+            )
+
 
 # ---------------------------------------------------------------------------
 # portfolio_node
