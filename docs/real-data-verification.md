@@ -102,6 +102,44 @@ for column names like `"收盘"`, `"wind_code"`, `"jjdm"`, etc.
    by AkShare column changes — but any real-data path you add should be smoke-tested
    manually with live data.
 
+## Verified Run — 2026-08-10 (real keys)
+
+A keyed end-to-end run was executed via `scripts/verify_real.py` (sample market data +
+**real GLM-4.7 + DeepSeek-V3 jury** + **real Langfuse tracing**). Results:
+
+| Profile | status | decision | portfolio R | fx exposure | real tokens | latency |
+|---|---|---|---|---|---|---|
+| C2 conservative (no cross-border) | done | PASS | R2 | 0.0% | 1946 | 34.5s |
+| C4 balanced (cross-border) | done | PASS | R4 | 3.96% | 1876 | 38.7s |
+
+- **Multi-model jury is real**: the macro-tilt `deliberate()` call consumed ~1.9k tokens
+  per advisory across GLM-4.7 + DeepSeek-V3. Latency (~35–39s) is dominated by GLM's
+  thinking mode on the macro call. Compliance jury only fires on DOWNGRADE/REJECT or high
+  FX, so PASS cases show `tokens: 0` at the compliance node (expected).
+- **Cross-border FX** is computed for real (C4 held HK/US → fx_exposure 3.96%); C2
+  (accept_cross_border=False) correctly stayed A-share only (fx 0.0%).
+- **conservative_mode** (C1/C2) tightened equity screening (PE cap 25) as designed.
+- **Langfuse**: `make langfuse-check` → `sent wealthwise.langfuse_smoke`; advisory runs
+  emit generation/embedding spans via the `langfuse.openai` drop-in when tracing is on.
+- Harmless noise: an `httpx SyncHttpxClientWrapper.__del__ AttributeError` prints at GC
+  on Python 3.14 — cosmetic, not a functional error.
+
+### AkShare live reachability (from this environment)
+
+- **Reachable & column-verified**: `ak.fund_open_fund_daily_em()` → cols include
+  `基金代码 / 基金简称 / {date}-单位净值 / 日增长率 / 申购状态 / 赎回状态 / 手续费`
+  (matches the provider's `基金代码/基金简称` mapping); `ak.macro_china_lpr()` → cols
+  `TRADE_DATE / LPR1Y / LPR5Y`.
+- **Blocked here**: `ak.stock_zh_a_spot_em()` (host `82.push2.eastmoney.com`) fails with
+  SSLError from this network (host-specific — other eastmoney endpoints return 200).
+  This is an environment/egress limitation, not a code defect, and it is exactly why the
+  A-share equity path still carries `TODO(live-calibration)`. On an unrestricted network,
+  verify its columns and finalize `AkShareMarketProvider._get` / `_map_equity_row`.
+
+> Note: some function/class names in the calibration section above are indicative; the
+> current provider uses `AkShareMarketProvider` / `AkShareFundProvider` / `AkShareMacroProvider`
+> / `AkShareFXProvider` with a `_get` seam + `_map_*` helpers.
+
 ## What "Live Calibration" Does NOT Affect
 
 - All unit tests and eval suites run exclusively against the **sample provider** (offline,
