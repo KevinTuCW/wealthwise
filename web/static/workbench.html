@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WealthWise Workbench — 金融投顾工作台</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f6fa;
+      --panel: #ffffff;
+      --text: #1c2430;
+      --muted: #667085;
+      --border: #d9dee7;
+      --accent: #1e40af;
+      --accent2: #0369a1;
+      --pass: #16a34a;
+      --warn: #b45309;
+      --danger: #b91c1c;
+      --neutral: #374151;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header {
+      padding: 16px 24px 12px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    h1 { margin: 0 0 12px; font-size: 20px; font-weight: 700; }
+    .subtitle { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+    form {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 8px 12px;
+      align-items: end;
+    }
+    .field { display: flex; flex-direction: column; gap: 3px; }
+    label { font-size: 12px; color: var(--muted); font-weight: 600; }
+    input, select {
+      height: 34px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0 10px;
+      font: inherit;
+      background: white;
+    }
+    .form-actions { display: flex; gap: 8px; align-items: flex-end; }
+    button {
+      height: 34px;
+      border: 0;
+      border-radius: 6px;
+      padding: 0 16px;
+      color: white;
+      background: var(--accent);
+      font-weight: 650;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    button:disabled { opacity: 0.55; cursor: default; }
+    #status-bar {
+      font-size: 12px;
+      color: var(--muted);
+      padding: 6px 24px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+      min-height: 28px;
+    }
+    main {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      padding: 14px 24px 28px;
+    }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    section.wide { grid-column: 1 / -1; }
+    h2 {
+      margin: 0;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      font-size: 14px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .panel-tag {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 999px;
+      color: white;
+    }
+    .tag-alloc { background: #1e40af; }
+    .tag-experts { background: #7c3aed; }
+    .tag-crosscheck { background: #0369a1; }
+    .tag-compliance { background: #b45309; }
+    .tag-cost { background: #374151; }
+    .body { padding: 12px 14px; }
+    .kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin-bottom: 12px; }
+    .kpi { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
+    .klabel { font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+    .kvalue { font-size: 18px; font-weight: 750; }
+    .chart-wrap { position: relative; height: 220px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { padding: 7px 8px; border-bottom: 2px solid var(--border); text-align: left; color: var(--muted); font-size: 11px; font-weight: 700; }
+    td { padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 12px; font-weight: 700; }
+    .pill-pass { background: #d1fae5; color: #065f46; }
+    .pill-downgrade { background: #fef3c7; color: #92400e; }
+    .pill-reject { background: #fee2e2; color: #991b1b; }
+    .pill-suitable { background: #e0f2fe; color: #0c4a6e; }
+    .pill-over { background: #fef9c3; color: #713f12; }
+    .pill-self { outline: 2px solid var(--accent); }
+    .check-present::before { content: "✓"; color: var(--pass); font-weight: 700; margin-right: 5px; }
+    .check-missing::before { content: "✗"; color: var(--danger); font-weight: 700; margin-right: 5px; }
+    .node-log { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .node-entry { padding: 3px 0; border-bottom: 1px solid var(--border); }
+    .node-entry:last-child { border: none; }
+    .node-name { font-weight: 700; color: var(--accent2); }
+    pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .expert-card { border: 1px solid var(--border); border-radius: 6px; padding: 10px; }
+    .expert-card h3 { margin: 0 0 8px; font-size: 13px; color: var(--accent); }
+    .kv-row { display: flex; gap: 6px; margin-bottom: 3px; font-size: 12px; }
+    .kv-k { color: var(--muted); min-width: 90px; }
+    @media (max-width: 860px) {
+      main { grid-template-columns: 1fr; padding: 10px; }
+      header { padding: 12px; }
+      form { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>WealthWise Workbench <span style="font-weight:400;font-size:14px;color:var(--muted)">金融投顾多 Agent 工作台</span></h1>
+    <form id="run-form">
+      <div class="field">
+        <label for="risk_level">风险等级</label>
+        <select id="risk_level" name="risk_level">
+          <option>C1</option><option>C2</option><option selected>C3</option>
+          <option>C4</option><option>C5</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="investable">可投资金额 (CNY)</label>
+        <input id="investable" name="investable" type="number" value="500000" min="1000">
+      </div>
+      <div class="field">
+        <label for="horizon_years">投资期限 (年)</label>
+        <input id="horizon_years" name="horizon_years" type="number" value="5" min="1" max="30">
+      </div>
+      <div class="field">
+        <label for="goals">投资目标</label>
+        <input id="goals" name="goals" value="balanced_growth" placeholder="逗号分隔">
+      </div>
+      <div class="field">
+        <label for="liquidity_min">最低流动性要求</label>
+        <input id="liquidity_min" name="liquidity_min" type="number" value="0.2" step="0.05" min="0" max="1">
+      </div>
+      <div class="field">
+        <label for="accept_cross_border">接受跨境投资</label>
+        <select id="accept_cross_border" name="accept_cross_border">
+          <option value="true" selected>是</option>
+          <option value="false">否</option>
+        </select>
+      </div>
+      <div class="form-actions">
+        <button type="submit" id="run-btn">▶ 运行</button>
+        <button type="button" id="stream-btn">⚡ 流式运行</button>
+      </div>
+    </form>
+  </header>
+  <div id="status-bar">就绪 — 填写投资者画像后点击"运行"</div>
+  <main>
+    <section>
+      <h2><span class="panel-tag tag-alloc">ALLOC</span> 资产配置</h2>
+      <div class="body">
+        <div class="kpis" id="alloc-kpis"></div>
+        <div class="chart-wrap"><canvas id="alloc-pie"></canvas></div>
+      </div>
+    </section>
+    <section>
+      <h2><span class="panel-tag tag-experts">EXPERTS</span> 专家贡献</h2>
+      <div class="body" id="experts-body"></div>
+    </section>
+    <section>
+      <h2><span class="panel-tag tag-crosscheck">CROSS</span> 交叉验证</h2>
+      <div class="body" id="crosscheck-body"></div>
+    </section>
+    <section>
+      <h2><span class="panel-tag tag-compliance">COMPLY</span> 合规审查</h2>
+      <div class="body" id="compliance-body"></div>
+    </section>
+    <section class="wide">
+      <h2><span class="panel-tag tag-cost">COST</span> 成本与管线</h2>
+      <div class="body">
+        <div class="kpis" id="cost-kpis"></div>
+        <div id="pipeline-log"></div>
+      </div>
+    </section>
+  </main>
+  <script>
+    const byId = (id) => document.getElementById(id);
+    const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const fmt = (v, digits = 2) => typeof v === "number" ? v.toFixed(digits) : (v ?? "—");
+    const pct = (v) => typeof v === "number" ? (v * 100).toFixed(1) + "%" : "—";
+
+    let pieChart = null;
+
+    function setStatus(msg) { byId("status-bar").textContent = msg; }
+
+    // ---- Allocation panel ----
+    function renderAlloc(alloc) {
+      const kpis = [
+        { k: "组合风险等级", v: alloc.portfolio_r_level || "—" },
+        { k: "境外敞口", v: pct(alloc.fx_exposure) },
+        { k: "波动率", v: alloc.metrics?.volatility != null ? pct(alloc.metrics.volatility) : "—" },
+        { k: "最大回撤", v: alloc.metrics?.max_drawdown != null ? pct(alloc.metrics.max_drawdown) : "—" },
+        { k: "Sharpe", v: fmt(alloc.metrics?.sharpe) },
+        { k: "分散度", v: fmt(alloc.metrics?.diversification) },
+      ];
+      byId("alloc-kpis").innerHTML = kpis.map(({ k, v }) =>
+        `<div class="kpi"><div class="klabel">${esc(k)}</div><div class="kvalue">${esc(v)}</div></div>`
+      ).join("");
+
+      // Pie: class_weights
+      const cw = alloc.class_weights || {};
+      const cwLabels = Object.keys(cw);
+      const cwValues = cwLabels.map((k) => +(cw[k] * 100).toFixed(1));
+      const colors = ["#1e40af","#0369a1","#6d28d9","#0891b2","#7c3aed","#db2777"];
+      if (pieChart) { pieChart.destroy(); pieChart = null; }
+      const ctx = byId("alloc-pie").getContext("2d");
+      pieChart = new Chart(ctx, {
+        type: "doughnut",
+        data: {
+          labels: cwLabels,
+          datasets: [{ data: cwValues, backgroundColor: colors, borderWidth: 1 }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { position: "right" } },
+        },
+      });
+    }
+
+    // ---- Experts panel ----
+    function renderExperts(experts) {
+      const kv = (k, v) => `<div class="kv-row"><span class="kv-k">${esc(k)}</span><span>${esc(v)}</span></div>`;
+      const macro = experts.macro || {};
+      const eq = experts.equity || {};
+      const fi = experts.fixed_income || {};
+      const pc = experts.portfolio_construction || {};
+      const co = experts.compliance || {};
+      byId("experts-body").innerHTML = `
+        <div class="grid-2">
+          <div class="expert-card"><h3>宏观研究</h3>
+            ${kv("倾向", macro.tilt || "—")}
+            ${kv("置信度", macro.confidence != null ? pct(macro.confidence) : "—")}
+            ${kv("市场环境", macro.regime || "—")}
+          </div>
+          <div class="expert-card"><h3>权益筛选</h3>
+            ${kv("候选数", eq.candidate_count ?? "—")}
+            ${kv("固收候选", fi.candidate_count ?? "—")}
+          </div>
+          <div class="expert-card"><h3>组合构建</h3>
+            ${kv("组合风险", pc.portfolio_r_level || "—")}
+            ${kv("境外敞口", pc.fx_exposure != null ? pct(pc.fx_exposure) : "—")}
+            ${kv("持仓数", pc.n_positions ?? "—")}
+          </div>
+          <div class="expert-card"><h3>合规初审</h3>
+            ${kv("结论", co.decision || "—")}
+            ${kv("置信度", co.confidence != null ? pct(co.confidence) : "—")}
+            ${co.violations?.length ? `<div class="kv-row" style="color:var(--danger)">违规:${esc(co.violations.join("; "))}</div>` : ""}
+          </div>
+        </div>`;
+    }
+
+    // ---- Crosscheck panel ----
+    function renderCrosscheck(cc) {
+      const agreementColor = cc.agreement === "unanimous" ? "var(--pass)"
+        : cc.agreement === "split" ? "var(--warn)" : "var(--muted)";
+      const escalations = (cc.escalation_signals || []).map(
+        (s) => `<span class="pill pill-reject">${esc(s)}</span>`).join(" ") || "<em>无</em>";
+      byId("crosscheck-body").innerHTML = `
+        <table>
+          <tr><th>指标</th><th>值</th></tr>
+          <tr><td>宏观倾向</td><td>${esc(cc.macro_tilt || "—")}</td></tr>
+          <tr><td>宏观置信度</td><td>${cc.macro_confidence != null ? pct(cc.macro_confidence) : "—"}</td></tr>
+          <tr><td>评判一致性</td><td style="color:${agreementColor};font-weight:700">${esc(cc.agreement || "—")}</td></tr>
+          <tr><td>评判事件数</td><td>${esc(cc.jury_event_count)}</td></tr>
+          <tr><td>升级信号</td><td>${escalations}</td></tr>
+        </table>`;
+    }
+
+    // ---- Compliance panel ----
+    function renderCompliance(comp) {
+      const decision = comp.compliance_decision || "";
+      const decisionPill = decision === "PASS" ? "pill-pass"
+        : decision === "REJECT" ? "pill-reject" : "pill-downgrade";
+
+      // C×R matrix
+      const matrix = comp.cr_matrix || [];
+      const rLevels = comp.r_levels_used || [];
+      const investorC = comp.investor_c_level || "";
+      const portR = comp.portfolio_r_level || "";
+
+      let matrixHtml = "";
+      if (matrix.length && rLevels.length) {
+        const header = `<tr><th>投资者 ↓ / 产品 →</th>${rLevels.map((r) => `<th>${esc(r)}</th>`).join("")}</tr>`;
+        const rows = matrix.map((row) => {
+          const isSelf = row.c_level === investorC;
+          const cells = rLevels.map((r) => {
+            const val = row[r] || "";
+            const cls = val === "suitable" ? "pill-suitable" : "pill-over";
+            const selfMark = (isSelf && r === portR) ? " pill-self" : "";
+            return `<td><span class="pill ${cls}${selfMark}">${esc(val)}</span></td>`;
+          }).join("");
+          return `<tr><td><strong>${esc(row.c_level)}${isSelf ? " ←" : ""}</strong></td>${cells}</tr>`;
+        }).join("");
+        matrixHtml = `<table style="margin-bottom:12px"><thead>${header}</thead><tbody>${rows}</tbody></table>`;
+      }
+
+      // Disclosure checklist
+      const fieldLabels = {
+        suitability_match: "适当性匹配说明",
+        risk_disclosure: "风险揭示",
+        not_advice_disclaimer: "非投资建议声明",
+        fx_cross_border_disclosure: "汇率/跨境风险揭示",
+      };
+      const checklist = (comp.disclosure_checklist || []).map((item) => {
+        const cls = item.present ? "check-present" : "check-missing";
+        return `<div class="${cls}">${esc(fieldLabels[item.field] || item.field)}</div>`;
+      }).join("");
+
+      byId("compliance-body").innerHTML = `
+        <div style="margin-bottom:10px">
+          结论：<span class="pill ${decisionPill}">${esc(decision || "—")}</span>
+        </div>
+        ${matrixHtml}
+        <div style="margin-bottom:8px;font-size:12px;font-weight:700;color:var(--muted)">披露清单</div>
+        ${checklist}
+        ${comp.violations?.length ? `<div style="margin-top:10px;font-size:12px;color:var(--danger)">${comp.violations.map((v) => `• ${esc(v)}`).join("<br>")}</div>` : ""}`;
+    }
+
+    // ---- Cost panel ----
+    function renderCost(cost) {
+      const kpis = [
+        { k: "Token 用量", v: (cost.tokens_used ?? 0).toLocaleString() },
+        { k: "预估费用", v: "$" + fmt(cost.cost_usd, 5) },
+        { k: "LLM 调用预算", v: cost.budget_spent ?? "—" },
+        { k: "节点数", v: cost.node_count ?? "—" },
+        { k: "Trace 事件", v: cost.trace_event_count ?? "—" },
+      ];
+      byId("cost-kpis").innerHTML = kpis.map(({ k, v }) =>
+        `<div class="kpi"><div class="klabel">${esc(k)}</div><div class="kvalue">${esc(v)}</div></div>`
+      ).join("");
+
+      const timings = cost.node_timings || [];
+      const log = timings.map((t) =>
+        `<div class="node-entry"><span class="node-name">${esc(t.node)}</span> — ${fmt(t.latency_s, 3)}s</div>`
+      ).join("");
+      byId("pipeline-log").innerHTML = log
+        ? `<div class="node-log" style="margin-top:10px">${log}</div>`
+        : "";
+    }
+
+    // ---- Full dashboard render ----
+    function renderDashboard(data) {
+      if (data.allocation) renderAlloc(data.allocation);
+      if (data.experts)    renderExperts(data.experts);
+      if (data.crosscheck) renderCrosscheck(data.crosscheck);
+      if (data.compliance) renderCompliance(data.compliance);
+      if (data.cost)       renderCost(data.cost);
+      setStatus(`完成 — 状态: ${data.status || "—"}`);
+    }
+
+    function collectProfile() {
+      const fd = new FormData(byId("run-form"));
+      return {
+        risk_level: fd.get("risk_level"),
+        investable: parseFloat(fd.get("investable")),
+        horizon_years: parseInt(fd.get("horizon_years"), 10),
+        goals: fd.get("goals").split(",").map((g) => g.trim()).filter(Boolean),
+        liquidity_min: parseFloat(fd.get("liquidity_min")),
+        accept_cross_border: fd.get("accept_cross_border") === "true",
+      };
+    }
+
+    // ---- Streaming run ----
+    let activeSource = null;
+    function streamRun() {
+      if (activeSource) { activeSource.close(); activeSource = null; }
+      const p = collectProfile();
+      const params = new URLSearchParams({
+        risk_level: p.risk_level,
+        investable: p.investable,
+        horizon_years: p.horizon_years,
+        goals: p.goals.join(","),
+        liquidity_min: p.liquidity_min,
+        accept_cross_border: p.accept_cross_border,
+      });
+      setStatus("连接 SSE 流…");
+      byId("pipeline-log").innerHTML = "";
+      const src = new EventSource(`/workbench/stream?${params}`);
+      activeSource = src;
+      src.addEventListener("start", (e) => {
+        setStatus("管线已启动 — " + JSON.parse(e.data).profile);
+      });
+      src.addEventListener("node", (e) => {
+        const d = JSON.parse(e.data);
+        const entry = document.createElement("div");
+        entry.className = "node-entry";
+        entry.innerHTML = `<span class="node-name">${esc(d.node)}</span> — ${esc(JSON.stringify(d).slice(0, 120))}`;
+        byId("pipeline-log").prepend(entry);
+      });
+      src.addEventListener("complete", (e) => {
+        src.close();
+        activeSource = null;
+        renderDashboard(JSON.parse(e.data));
+      });
+      src.onerror = () => {
+        setStatus("SSE 连接错误");
+        src.close();
+        activeSource = null;
+      };
+    }
+
+    // ---- POST run (no streaming) ----
+    async function postRun() {
+      setStatus("运行中…");
+      byId("run-btn").disabled = true;
+      try {
+        const res = await fetch("/workbench/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(collectProfile()),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        renderDashboard(await res.json());
+      } catch (err) {
+        setStatus("错误: " + err.message);
+      } finally {
+        byId("run-btn").disabled = false;
+      }
+    }
+
+    byId("run-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      postRun();
+    });
+    byId("stream-btn").addEventListener("click", streamRun);
+  </script>
+</body>
+</html>
