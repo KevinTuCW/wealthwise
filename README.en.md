@@ -10,7 +10,7 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-orchestration-1C3C3C.svg)](https://langchain-ai.github.io/langgraph/)
 [![Langfuse](https://img.shields.io/badge/Langfuse-tracing-fbbf24.svg)](https://langfuse.com/)
 [![CI](https://img.shields.io/badge/CI-tests%20%2B%20eval%20gate-2088FF.svg?logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
-[![eval suite](https://img.shields.io/badge/eval%20suite-58%2F58-brightgreen.svg)](#eval)
+[![eval suite](https://img.shields.io/badge/eval%20suite-64%2F64%20(offline)-brightgreen.svg)](#eval)
 [![suitability leaks](https://img.shields.io/badge/suitability%20leaks-0-brightgreen.svg)](#eval)
 [![injection block](https://img.shields.io/badge/injection%20block-100%25-brightgreen.svg)](#eval)
 
@@ -121,7 +121,7 @@ DONE   (full trace returned; Langfuse synced if enabled)
 | --- | --- |
 | API / orchestration | FastAPI · LangGraph |
 | Primary model | **GLM-4.7** (z.ai, OpenAI-compatible) |
-| Cross-check model | **DeepSeek-V3** (SiliconFlow — cross-lab independent judge) |
+| Cross-check model | **DeepSeek-V3** + **Kimi-K3** (both via SiliconFlow) — an odd, three-lab jury with GLM |
 | Real market data | **AkShare** (A/HK/US equity, fixed income, macro, FX) |
 | Offline runtime | Sample provider + local hash embedding + in-memory vector store + offline jury (zero keys, zero network) |
 | RAG | In-memory cosine store + local hash embedding; retrieves macro context and compliance/research corpus |
@@ -144,10 +144,10 @@ python3 -m venv .venv
 .venv/bin/pip install -e '.[dev,llm]'
 
 # 3. Run tests (offline, hermetic)
-make test           # → 358 passed
+make test           # → 370 passed
 
 # 4. Run eval gate (offline, hard gates)
-make eval           # → 58/58, suitability leaks 0, injection block 100%
+make eval           # → 64/64, suitability leaks 0, injection block 100%
 
 # 5. Start the workbench
 make run            # uvicorn wealthwise.app:app --reload
@@ -240,7 +240,7 @@ Injection attacks on `goals` or profile text fields hit the input guardrail and 
 make eval   # = python -m wealthwise.eval  (all 6 suites)
 ```
 
-**6 suites / 58 cases** (fully offline, hermetic):
+**7 suites / 64 cases** (fully offline, hermetic):
 
 | Suite | Coverage |
 | --- | --- |
@@ -255,7 +255,7 @@ make eval   # = python -m wealthwise.eval  (all 6 suites)
 
 | Metric | Value | Gate |
 | --- | --- | --- |
-| total_cases | **58** | >= 30 |
+| total_cases | **64** | >= 30 |
 | pass_rate | **1.000** | 1.0 |
 | decision_accuracy | **1.000** | >= 0.8 |
 | **suitability_leaks** | **0** | = 0 (exit 2) |
@@ -309,7 +309,7 @@ suite is hermetic and never emits to a live Langfuse project.
 See the Chinese README ([README.md](README.md)) for an annotated file tree. Key entry points:
 `src/wealthwise/app.py` (FastAPI), `agents/supervisor/graph.py` (LangGraph), `agents/experts/`
 (the five expert nodes), `compliance/suitability.py` (C–R hard gate), `eval.py` (hard-gate CLI),
-`data/samples/` (equities/funds/macro/fx/policy/research), `data/evals/` (6 suites / 58 cases),
+`data/samples/` (equities/funds/macro/fx/policy/research), `data/evals/` (7 suites / 64 cases),
 `scripts/verify_real.py` (keyed real-data verification).
 
 ## Roadmap / Honest Gaps
@@ -324,7 +324,7 @@ Delivered:
 - [x] RAG macro context + compliance/research corpus (in-memory, local hash embedding)
 - [x] Langfuse full-trace observability (optional, offline-safe)
 - [x] SSE workbench + run audit store (memory / sqlite)
-- [x] Multi-suite eval gate with hard gates (58 cases, incl. end-to-end status_routing)
+- [x] Multi-suite eval gate with hard gates (64 cases, incl. end-to-end status_routing)
 - [x] Docker + docker-compose + CI (GitHub Actions)
 - [x] Persistence (RunStore: memory + sqlite, Postgres reserved)
 

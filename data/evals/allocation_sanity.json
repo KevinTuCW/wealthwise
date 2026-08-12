@@ -1,0 +1,69 @@
+[
+  {
+    "name": "c4-retirement-long-must-actually-hold-equity",
+    "kind": "allocation_sanity",
+    "profile": {"risk_level": "C4", "investable": 1000000.0, "horizon_years": 10,
+                "goals": ["retirement"], "liquidity_min": 0.2, "accept_cross_border": true},
+    "equity_min": 0.45,
+    "equity_max": 0.80,
+    "liquidity_min": 0.2,
+    "max_single_weight": 0.25,
+    "max_positions": 30,
+    "expect_constraints_met": true,
+    "notes": "The regression case: this profile once produced 82.8% cash / 6.8% equity and passed every compliance check. A growth mandate answered with money-market funds is unsuitable in the other direction."
+  },
+  {
+    "name": "c5-growth-long-horizon-equity-weighted",
+    "kind": "allocation_sanity",
+    "profile": {"risk_level": "C5", "investable": 2000000.0, "horizon_years": 15,
+                "goals": ["growth"], "liquidity_min": 0.1, "accept_cross_border": true},
+    "equity_min": 0.5,
+    "equity_max": 0.85,
+    "liquidity_min": 0.1,
+    "max_single_weight": 0.25,
+    "expect_constraints_met": true
+  },
+  {
+    "name": "c2-income-short-horizon-stays-conservative",
+    "kind": "allocation_sanity",
+    "profile": {"risk_level": "C2", "investable": 500000.0, "horizon_years": 3,
+                "goals": ["income"], "liquidity_min": 0.3, "accept_cross_border": false},
+    "equity_max": 0.25,
+    "liquidity_min": 0.3,
+    "max_single_weight": 0.35,
+    "expect_constraints_met": true,
+    "notes": "The cap direction still holds: a conservative short-horizon mandate must not be talked into equity."
+  },
+  {
+    "name": "c1-capital-preservation-is-allowed-to-be-all-safe",
+    "kind": "allocation_sanity",
+    "profile": {"risk_level": "C1", "investable": 300000.0, "horizon_years": 2,
+                "goals": ["capital_preservation"], "liquidity_min": 0.5,
+                "accept_cross_border": false},
+    "equity_max": 0.1,
+    "liquidity_min": 0.5,
+    "expect_constraints_met": true,
+    "notes": "The floor must never override an investor who genuinely wants capital preservation — C1 short-horizon is the one profile where an all-safe book is the right answer."
+  },
+  {
+    "name": "c3-education-mid-horizon-balanced",
+    "kind": "allocation_sanity",
+    "profile": {"risk_level": "C3", "investable": 800000.0, "horizon_years": 6,
+                "goals": ["education"], "liquidity_min": 0.15, "accept_cross_border": true},
+    "equity_min": 0.35,
+    "equity_max": 0.70,
+    "liquidity_min": 0.15,
+    "max_single_weight": 0.25,
+    "expect_constraints_met": true
+  },
+  {
+    "name": "high-liquidity-demand-is-honoured-not-approximated",
+    "kind": "allocation_sanity",
+    "profile": {"risk_level": "C4", "investable": 1000000.0, "horizon_years": 10,
+                "goals": ["retirement"], "liquidity_min": 0.7, "accept_cross_border": false},
+    "liquidity_min": 0.7,
+    "equity_max": 0.31,
+    "expect_constraints_met": true,
+    "notes": "The old weight-space bug could miss the liquidity floor by several points and only record it in metrics; the floor is a constraint, not a suggestion."
+  }
+]

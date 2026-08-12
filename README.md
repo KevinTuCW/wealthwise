@@ -10,7 +10,7 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-orchestration-1C3C3C.svg)](https://langchain-ai.github.io/langgraph/)
 [![Langfuse](https://img.shields.io/badge/Langfuse-tracing-fbbf24.svg)](https://langfuse.com/)
 [![CI](https://img.shields.io/badge/CI-tests%20%2B%20eval%20gate-2088FF.svg?logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
-[![eval suite](https://img.shields.io/badge/eval%20suite-58%2F58-brightgreen.svg)](#评测)
+[![eval suite](https://img.shields.io/badge/eval%20suite-64%2F64%20(offline)-brightgreen.svg)](#评测)
 [![suitability leaks](https://img.shields.io/badge/suitability%20leaks-0-brightgreen.svg)](#评测)
 [![injection block](https://img.shields.io/badge/injection%20block-100%25-brightgreen.svg)](#评测)
 
@@ -87,13 +87,13 @@ DONE   （返回完整 trace；开启后同步 Langfuse）
 | 目标规划 Goal | 把投资者目标与期限解析成 `goal_constraints`（R 级上限、外币敞口上限、流动性下限） |
 | 宏观 Macro | 经 RAG 检索宏观上下文（CPI/PMI/利率片段），交陪审出大类资产 tilt |
 | 权益 Equity | 按 R 级适配在 A/港/美股筛选权益与固收候选（不接受跨境则仅 A 股） |
-| 风险组合 Portfolio | 反波动率 / 风险预算优化器；产出 `PortfolioAllocation`（含 `fx_exposure` 与 `portfolio_r_level`） |
+| 风险组合 Portfolio | **两级**风险预算优化器：先按目标定大类中枢（`min_equity`/`max_equity`/`liquidity_min`），再在类内做反波动率（含波动下限与单一标的占比上限）；产出 `PortfolioAllocation` |
 | 合规 Compliance | 中国 C1–C5 适当性检查 + 多模型陪审（GLM 主 + DeepSeek-V3 副）；产出 PASS / DOWNGRADE / REJECT，**陪审只能加严、永不软化 REJECT** |
 
 **双重交叉验证：**
 
 - *多源共识*（支柱一）—— 宏观/量化信号从多个 AkShare 接口汇成中位数，单源读数置信封顶 0.5。
-- *多模型陪审*（支柱二）—— 合规与宏观判定交给双模型陪审（GLM + DeepSeek-V3，跨实验室保证独立性）；多数标签胜出，低置信升级人工复核。
+- *多模型陪审*（支柱二）—— 合规与宏观判定交给**跨三家实验室的奇数陪审团**（GLM-4.7 智谱 / DeepSeek-V3 / Kimi-K3 Moonshot）；多数标签胜出（3/3=1.0、2/3≈0.667、三方分歧无多数记 `None`），低置信升级人工复核。奇数才有「多数」可言——两个模型只有「一致」与「平票」两种结果。**PASS 也要复核**：确定性规则只会错在「本该拦却放行」这一侧，所以 PASS 结果按 `jury_review_pass_rate` 抽样复检（默认全查），陪审依旧只能加严。
 
 **三层护栏：**
 
@@ -107,7 +107,7 @@ DONE   （返回完整 trace；开启后同步 Langfuse）
 | --- | --- |
 | API / 编排 | FastAPI · LangGraph |
 | 主模型 | **GLM-4.7**（z.ai，OpenAI 兼容） |
-| 交叉验证模型 | **DeepSeek-V3**（SiliconFlow — 跨实验室独立判官） |
+| 交叉验证模型 | **DeepSeek-V3** + **Kimi-K3**（均走 SiliconFlow）—— 与 GLM 合成跨三家实验室的奇数陪审团 |
 | 真实行情 | **AkShare**（A/港/美股、基金、宏观、汇率） |
 | 离线运行时 | 样例 Provider + 本地哈希嵌入 + 内存向量库 + 离线陪审（零 key、零网络） |
 | RAG | 内存余弦向量库 + 本地哈希嵌入；检索宏观上下文与合规/研报语料 |
@@ -129,10 +129,10 @@ python3 -m venv .venv
 .venv/bin/pip install -e '.[dev,llm]'
 
 # 3. 跑测试（离线、hermetic）
-make test           # → 358 passed
+make test           # → 370 passed
 
 # 4. 跑评测门禁（离线、硬门）
-make eval           # → 58/58，适当性漏判 0，注入拦截 100%
+make eval           # → 64/64（离线档），适当性漏判 0，配置合理性 100%，注入拦截 100%
 
 # 5. 启动工作台
 make run            # uvicorn wealthwise.app:app --reload
@@ -223,7 +223,9 @@ curl -N 'localhost:8000/workbench/stream?risk_level=C3&investable=500000&horizon
 make eval   # = python -m wealthwise.eval  （全部 6 套件）
 ```
 
-**6 套件 / 58 例**（完全离线、hermetic）：
+**7 套件 / 64 例**（完全离线、hermetic）：
+
+> 这套门禁跑在离线桩陪审上：它度量的是**规则与流水线**是否自洽，不是模型判断力。真模型的表现要用 keyed 真实验证单独跑（见 `docs/real-data-verification.md`）。
 
 | 套件 | 覆盖 |
 | --- | --- |
@@ -233,12 +235,13 @@ make eval   # = python -m wealthwise.eval  （全部 6 套件）
 | `cross_border` | 跨境披露完整性 + 未授权持仓门：持港/美股必须含实质汇率披露 |
 | `robustness` | 注入拦截率、画像变形不变性（格式变体不得改变决策）、良性边界误报率 |
 | `status_routing` | 端到端状态路由：注入越级/跨境/去流动性，验证 DOWNGRADE→需复核、REJECT→不可出具 |
+| `allocation_sanity` | **配置合理性（硬门）**：权益上下限、流动性下限真达成、单一持仓上限、持仓数上限 —— 适当性的另一侧：方案不能「安全到答非所问」 |
 
 **最新基线：**
 
 | 指标 | 值 | 门禁 |
 | --- | --- | --- |
-| total_cases | **58** | >= 30 |
+| total_cases | **64** | >= 30 |
 | pass_rate | **1.000** | 1.0 |
 | decision_accuracy | **1.000** | >= 0.8 |
 | **suitability_leaks** | **0** | = 0（exit 2） |
@@ -248,6 +251,7 @@ make eval   # = python -m wealthwise.eval  （全部 6 套件）
 | invariance_pass_rate | **1.000** | >= 1.0（exit 2） |
 | false_positive_rate | **0.000** | = 0.0（exit 2） |
 | **status_routing_accuracy** | **1.000** | >= 1.0（exit 2） |
+| **allocation_sanity_rate** | **1.000** | >= 1.0（exit 2） |
 | **门禁** | | **PASS** |
 
 > 评测套件位于 [`data/evals/`](data/evals/)。每次运行生成报告 [`data/evals/report.md`](data/evals/report.md)。
@@ -273,12 +277,13 @@ intake → input_guard → planner → budget_macro → macro → equity
 | `USE_REAL_PROVIDERS` | `true` 启用 AkShare 数据 + 真实 LLM 陪审（默认 `false`） |
 | `GLM_API_KEY` / `GLM_BASE_URL` | 主模型（GLM-4.7，z.ai OpenAI 兼容网关） |
 | `SILICONFLOW_API_KEY` | 交叉验证陪审模型 key（SiliconFlow） |
-| `CROSSCHECK_MODEL` | 交叉验证模型名（默认 `deepseek-ai/DeepSeek-V3`） |
+| `CROSSCHECK_MODEL` | 第二陪审员（默认 `deepseek-ai/DeepSeek-V3`） |
+| `THIRD_MODEL` | 第三陪审员（默认 `moonshotai/Kimi-K3`，走 SiliconFlow，凑成奇数陪审团）；设空串回退两模型档 |
 | `ENABLE_LANGFUSE_TRACING` | `true` 向 Langfuse 发送 trace |
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | Langfuse 项目凭证 |
 | `LANGFUSE_BASE_URL` | Langfuse 端点（默认 `https://us.cloud.langfuse.com`） |
 | `MAX_FX_EXPOSURE` | 组合非 CNY 资产最大占比（默认 `0.5`） |
-| `MAX_LLM_JUDGMENTS` | 单次运行 LLM 调用硬预算上限（默认 `12`） |
+| `MAX_LLM_JUDGMENTS` | 单次运行 LLM 调用硬预算上限（默认 `12`）。预算估算按**实际陪审员数**推算（一次合议 = 每位陪审员一次调用），三名陪审员的一次完整咨询实测占用 6/12，留有余量 |
 | `RISK_BUDGET_METHOD` | 组合优化方法：`risk_parity`（默认；其他方法预留，未实现即 `NotImplementedError`） |
 | `RUN_STORE` | 审计持久化：`memory`（默认）或 `sqlite` |
 | `TOKEN_PRICE_PER_1K` | 成本核算用的混合 $/1k tokens 单价 |
@@ -305,7 +310,7 @@ wealthwise/
 │   │   ├── fx.json             # 汇率
 │   │   ├── policy.json         # 适当性/风险揭示政策语料（RAG）
 │   │   └── research.json       # 标的研报/资讯语料（RAG）
-│   └── evals/                  # 6 套件 / 58 例
+│   └── evals/                  # 7 套件 / 64 例
 │       ├── golden.json  suitability.json  misleading.json
 │       ├── cross_border.json  robustness.json  status_routing.json
 │       └── report.md
@@ -332,7 +337,7 @@ wealthwise/
 │   ├── providers/              # SampleProvider · AkShareProvider（Protocol）· consensus · registry
 │   ├── rag/                    # embed（本地哈希）· store（内存余弦）· corpus
 │   └── security/               # sanitize.py（注入检测）· redact.py（PII 脱敏）
-└── tests/                      # pytest（358 passed，离线 hermetic）
+└── tests/                      # pytest（370 passed，conftest 强制隔离开发者 .env）
 ```
 
 ## 路线图 / 诚实的留白
@@ -347,7 +352,7 @@ wealthwise/
 - [x] RAG 宏观上下文 + 合规/研报语料（内存、本地哈希嵌入）
 - [x] Langfuse 全链路可观测（可选、离线安全）
 - [x] SSE 工作台 + 运行审计存储（memory / sqlite）
-- [x] 多套件评测门禁（58 例，含端到端 status_routing）
+- [x] 多套件评测门禁（64 例，含端到端 status_routing 与 allocation_sanity 硬门）
 - [x] Docker + docker-compose + CI（GitHub Actions）
 - [x] 持久化（RunStore：memory + sqlite，Postgres 预留）
 

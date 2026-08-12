@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     siliconflow_api_key: str = ""
     siliconflow_base_url: str = "https://api.siliconflow.com/v1"
     crosscheck_model: str = "deepseek-ai/DeepSeek-V3"    # cross-lab judge, distinct from GLM
+    # Third juror, also on SiliconFlow. Three labs (Zhipu / DeepSeek / Moonshot)
+    # give the vote an actual majority: two models can only agree (confidence 1.0)
+    # or tie (label=None), so "多数标签胜出" described something that never
+    # happened. An odd jury makes 3/3, 2/3 and no-majority three distinct
+    # outcomes. Set to "" to fall back to the two-model configuration.
+    third_model: str = "moonshotai/Kimi-K3"
 
     # --- embeddings ---
     embed_provider: str = "local"            # "local" (offline hashing) | "siliconflow"
@@ -73,6 +79,15 @@ class Settings(BaseSettings):
         return {
             "name": self.crosscheck_model,
             "model": self.crosscheck_model,
+            "base_url": self.siliconflow_base_url,
+            "api_key": self.siliconflow_api_key,
+        }
+
+    def third_client_kwargs(self) -> dict:
+        """Kwargs to build the third juror (SiliconFlow), making the vote odd."""
+        return {
+            "name": self.third_model,
+            "model": self.third_model,
             "base_url": self.siliconflow_base_url,
             "api_key": self.siliconflow_api_key,
         }

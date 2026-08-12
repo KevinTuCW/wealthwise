@@ -46,6 +46,23 @@ _EQUITY_CAPS: dict[tuple[str, str], float] = {
     ("conservative", "short"): 0.20,
 }
 
+# ---------------------------------------------------------------------------
+# Equity FLOOR table — the other half of suitability
+# ---------------------------------------------------------------------------
+# A cap alone only prevents "too aggressive". Answering a ten-year retirement
+# mandate with a pile of money-market funds is unsuitable in the other
+# direction, and nothing downstream was checking for it. The floor sits at
+# roughly two-thirds of the cap: enough to keep the mandate honest, loose enough
+# that the liquidity floor and the de-risk retry still have room to move.
+_EQUITY_FLOORS: dict[tuple[str, str], float] = {
+    ("aggressive", "long"):  0.55,
+    ("aggressive", "mid"):   0.40,
+    ("aggressive", "short"): 0.25,
+    ("conservative", "long"):  0.30,
+    ("conservative", "mid"):   0.20,
+    ("conservative", "short"): 0.05,
+}
+
 # Target return bands  (low, high) as approximate annualized targets
 _RETURN_BANDS: dict[tuple[str, str], tuple[float, float]] = {
     ("aggressive", "long"):  (0.07, 0.12),
@@ -102,11 +119,14 @@ def goal_node(state: AdvisoryState, deps) -> dict:
 
     key = (g_bucket, h_bucket)
     max_equity = _EQUITY_CAPS[key]
+    # The floor must never fight the investor's own liquidity requirement.
+    min_equity = min(_EQUITY_FLOORS[key], max(0.0, 1.0 - profile.liquidity_min))
     return_band = _RETURN_BANDS[key]
 
     goal_constraints = {
         "risk_ceiling": risk_ceiling,
         "max_equity": max_equity,
+        "min_equity": min_equity,
         "target_return_low": return_band[0],
         "target_return_high": return_band[1],
         "liquidity_min": profile.liquidity_min,
@@ -120,6 +140,7 @@ def goal_node(state: AdvisoryState, deps) -> dict:
         "ts": time.time(),
         "risk_ceiling": risk_ceiling,
         "max_equity": max_equity,
+        "min_equity": min_equity,
         "goal_bucket": g_bucket,
         "horizon_bucket": h_bucket,
     }
@@ -127,7 +148,7 @@ def goal_node(state: AdvisoryState, deps) -> dict:
         f"goal_node: {profile.risk_level}→{risk_ceiling} ceiling; "
         f"goals={profile.goals} ({g_bucket}); "
         f"horizon={profile.horizon_years}y ({h_bucket}); "
-        f"max_equity={max_equity:.0%}; "
+        f"equity={min_equity:.0%}–{max_equity:.0%}; "
         f"liquidity_min={profile.liquidity_min:.0%}"
     )
 

@@ -4,9 +4,10 @@ Decision chain (strict, cannot be reversed by jury):
   1. check_suitability() → deterministic base verdict (PASS / DOWNGRADE / REJECT).
   2. detect_misleading() on any drafted explanation text.
   3. Retrieve relevant policy clauses via policy_retriever.
-  4. For DOWNGRADE/REJECT cases: call jury to corroborate (using policy text as
-     untrusted context). Jury can only AGREE or ESCALATE — it can NEVER soften
-     a REJECT or DOWNGRADE to PASS.
+  4. Call the jury to corroborate (using policy text as untrusted context) for
+     DOWNGRADE/REJECT cases, high FX exposure, or a sampled share of PASS
+     verdicts. Jury can only AGREE or ESCALATE — it can NEVER soften a REJECT
+     or DOWNGRADE to PASS.
   5. Add mandatory disclosures: suitability-match statement + risk disclosure +
      cross-border FX wording when portfolio holds HK/US assets.
 
@@ -16,6 +17,7 @@ Invariant: if suitability → REJECT, the final decision is always REJECT.
 """
 from __future__ import annotations
 
+import hashlib
 import time
 
 from wealthwise.agents.state import AdvisoryState, ComplianceVerdict
@@ -48,6 +50,21 @@ _SEVERITY: dict[str, int] = {"PASS": 0, "DOWNGRADE": 1, "REJECT": 2}
 def _stricter(a: str, b: str) -> str:
     """Return the stricter of two decision labels (higher severity wins)."""
     return a if _SEVERITY.get(a, 0) >= _SEVERITY.get(b, 0) else b
+
+
+def _sample_pass_review(profile, rate: float) -> bool:
+    """Deterministically decide whether a PASS also gets a jury review.
+
+    Hashed on the profile rather than randomised, so the same investor gets the
+    same treatment on every run and the eval stays reproducible.
+    """
+    if rate <= 0:
+        return False
+    if rate >= 1:
+        return True
+    key = f"{profile.risk_level}|{sorted(profile.goals)}|{profile.horizon_years}"
+    bucket = int(hashlib.sha256(key.encode("utf-8")).hexdigest(), 16) % 100
+    return bucket < rate * 100
 
 
 def compliance_node(state: AdvisoryState, deps) -> dict:
@@ -99,13 +116,19 @@ def compliance_node(state: AdvisoryState, deps) -> dict:
     policy_docs = deps.policy_retriever.search(_POLICY_QUERY, k=3)
 
     # ------------------------------------------------------------------
-    # Step 4: Jury corroboration (only runs for DOWNGRADE / REJECT cases,
-    #         or when FX exposure is high — jury advisory only)
+    # Step 4: Jury corroboration — DOWNGRADE / REJECT cases, high FX exposure,
+    #         or a sampled review of a PASS. The PASS branch matters most: the
+    #         rule is deterministic, but its *input* (an asset's R-level) can be
+    #         wrong, and that failure mode only ever shows up as a false PASS.
+    #         Jury remains advisory and can only tighten (see _stricter).
     # ------------------------------------------------------------------
     jury_tokens = 0
     jury_decision = base_verdict.decision  # default: agree with suitability
 
-    if base_verdict.decision in {"DOWNGRADE", "REJECT"} or portfolio.fx_exposure > 0.2:
+    review_pass = _sample_pass_review(profile, getattr(deps, "jury_review_pass_rate", 1.0))
+    if (base_verdict.decision in {"DOWNGRADE", "REJECT"}
+            or portfolio.fx_exposure > 0.2
+            or review_pass):
         safe_policy = "\n".join(neutralize_untrusted(d.text) for d in policy_docs)
         portfolio_summary = (
             f"portfolio_r_level={portfolio.portfolio_r_level}, "
@@ -152,11 +175,16 @@ def compliance_node(state: AdvisoryState, deps) -> dict:
             "汇率波动可能影响实际收益，请注意跨境通道（港股通/QDII）与税收风险。"
         )
 
-    # Final compliance verdict — confidence from deterministic suitability (1.0)
-    # reduced slightly when jury escalation fires
+    # Final compliance verdict confidence. This used to be the constant 1.0
+    # (dropping to 0.9 only on escalation), which meant every issued advisory
+    # carried the exact same "confidence" — a number that told the user nothing.
+    # Compose it from what actually varies: whether the jury agreed, and whether
+    # the optimizer could satisfy the constraints it was given.
     confidence = base_verdict.confidence
     if jury_decision != base_verdict.decision:
-        confidence = max(0.7, confidence - 0.1)  # jury escalated; note lower confidence
+        confidence = max(0.7, confidence - 0.1)   # jury escalated
+    if not portfolio.metrics.get("constraints_met", True):
+        confidence = max(0.5, confidence - 0.2)   # constraints only approximated
 
     verdict = ComplianceVerdict(
         decision=final_decision,

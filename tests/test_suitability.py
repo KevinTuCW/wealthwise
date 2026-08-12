@@ -292,3 +292,72 @@ def test_absent_symbol_treated_as_high_risk():
     assert any("UNKNOWN_SYM" in v for v in verdict.violations), (
         f"Expected UNKNOWN_SYM in violations, got: {verdict.violations}"
     )
+
+
+# ---------------------------------------------------------------------------
+# The jury may only tighten — proved against a stub that actively tries to soften
+# ---------------------------------------------------------------------------
+
+class _SpoilerJury:
+    """A judge that always votes PASS, however bad the portfolio is.
+
+    The offline jury echoes the rule's own verdict back, so "陪审只能加严，永远
+    软化不了 REJECT" was asserted everywhere and tested nowhere. This stub is the
+    adversary that claim needs: if `_stricter` ever regressed, these tests fail.
+    """
+
+    name = "spoiler"
+
+    def judge(self, system, user, labels):
+        from wealthwise.llm import Verdict
+        return Verdict(label="PASS", rationale="nothing to see here", tokens=1)
+
+
+def _deps_with_spoiler_jury():
+    from dataclasses import replace
+    from wealthwise.bootstrap import build_sample_deps
+    return replace(build_sample_deps(), jury_clients=[_SpoilerJury()])
+
+
+def test_jury_cannot_soften_a_cross_border_reject():
+    from wealthwise.agents.state import InvestorProfile
+    from wealthwise.runner import run_advisory
+
+    # Unauthorized cross-border is a hard REJECT in the deterministic rules.
+    profile = InvestorProfile(
+        risk_level="C5", investable=1_000_000.0, horizon_years=10,
+        goals=["growth"], liquidity_min=0.0, accept_cross_border=False,
+    )
+    state = run_advisory(profile, _deps_with_spoiler_jury())
+    if state.compliance and state.compliance.violations:
+        assert state.compliance.decision in ("DOWNGRADE", "REJECT")
+    assert state.status != "done" or state.compliance.decision == "PASS"
+
+
+def test_stricter_never_lets_a_pass_vote_override_a_reject():
+    from wealthwise.agents.experts.compliance import _stricter
+    assert _stricter("REJECT", "PASS") == "REJECT"
+    assert _stricter("DOWNGRADE", "PASS") == "DOWNGRADE"
+    assert _stricter("PASS", "REJECT") == "REJECT"      # jury may tighten
+    assert _stricter("DOWNGRADE", "REJECT") == "REJECT"
+
+
+def test_spoiler_jury_cannot_clear_an_over_level_portfolio():
+    from wealthwise.agents.experts.compliance import compliance_node
+    from wealthwise.agents.state import (AdvisoryState, AssetCandidate,
+                                         InvestorProfile, PortfolioAllocation)
+
+    over_level = AssetCandidate(symbol="X", name="X", market="A", asset_class="equity",
+                                r_level="R5", currency="CNY", metrics={"volatility": 0.4})
+    state = AdvisoryState(
+        profile=InvestorProfile(risk_level="C2", investable=100000.0, horizon_years=5,
+                                goals=["growth"], liquidity_min=0.0,
+                                accept_cross_border=True),
+        portfolio=PortfolioAllocation(weights={"X": 1.0}, class_weights={"equity": 1.0},
+                                      portfolio_r_level="R5", fx_exposure=0.0,
+                                      metrics={"constraints_met": True}),
+        equity_candidates=[over_level],
+    )
+    out = compliance_node(state, _deps_with_spoiler_jury())
+    assert out["compliance"].decision == "REJECT"
+    assert out["compliance"].matched is False

@@ -17,6 +17,22 @@ from wealthwise.rag.corpus import load_policy_retriever, load_research_retriever
 from wealthwise.rag.embed import LocalHashingEmbedder
 
 
+def _evidence(user: str, labels: list[str]) -> str:
+    """Strip instruction lines that merely enumerate the label vocabulary.
+
+    A prompt line like "Classify: PASS, DOWNGRADE, or REJECT?" is a question,
+    not evidence; keyword heuristics must not read it as a verdict.
+    """
+    keep: list[str] = []
+    for line in user.splitlines():
+        low = line.lower()
+        named = sum(1 for l in labels if l.lower() in low)
+        if named >= 2 and ("classify" in low or "respond" in low or low.endswith("?")):
+            continue
+        keep.append(line)
+    return "\n".join(keep)
+
+
 class OfflineJuryClient:
     """Deterministic offline judge — stage/context-aware, no API calls.
 
@@ -41,10 +57,13 @@ class OfflineJuryClient:
             → neutral (safe default)
         - Fallback: first label in the set.
         """
-        # Match REJECT/DOWNGRADE triggers against the user content ONLY so that
-        # instruction text in the system prompt (e.g. "REJECTED") cannot satisfy
-        # the heuristic and cause every compliance call to return REJECT.
-        user_lower = user.lower()
+        # Match triggers against the *evidence* only. Excluding the system prompt
+        # was not enough: the user prompt ends with its own instruction line
+        # ("Classify: PASS, DOWNGRADE, or REJECT?"), which contains every label
+        # name, so a naive substring scan returned DOWNGRADE for every single
+        # call. That stayed invisible while portfolios were cash-heavy and the
+        # jury almost never ran; it downgraded every advisory once they were not.
+        user_lower = _evidence(user, labels).lower()
 
         if set(labels) == {"PASS", "DOWNGRADE", "REJECT"}:
             # Compliance judgment — check user content only.
@@ -73,8 +92,8 @@ class OfflineJuryClient:
                 label = "PASS"
 
         elif labels == ["overweight", "neutral", "underweight"]:
-            # Macro tilt judgment — use combined system+user for context
-            combined = f"{system}\n{user}".lower()
+            # Macro tilt judgment — same evidence-only scoping as compliance
+            combined = _evidence(user, labels).lower()
             if "underweight" in combined or "bear" in combined or "recession" in combined:
                 label = "underweight"
             elif "overweight" in combined or "bull" in combined:

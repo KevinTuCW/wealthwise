@@ -64,7 +64,7 @@ from wealthwise.runner import run_advisory
 from wealthwise.security.sanitize import detect_injection
 
 DEFAULT_SUITES = ("golden", "suitability", "misleading", "cross_border", "robustness",
-                  "status_routing")
+                  "status_routing", "allocation_sanity")
 _GUARDRAIL_BLOCKED_STATUSES = {"GUARDRAIL_BLOCKED"}
 
 
@@ -656,6 +656,73 @@ def _run_status_routing(cases: list[dict], suite: str) -> tuple[list[EvalResult]
     return results, metrics
 
 
+
+def _run_allocation_sanity(cases: list[dict], deps, suite: str) -> tuple[list[EvalResult], dict]:
+    """Is the allocation itself defensible — not just compliant?
+
+    Every other suite asks "did we avoid recommending something too risky?".
+    None of them asked "did we actually answer the mandate?". A ten-year growth
+    goal answered with 83% money-market funds passed all of them: suitable in
+    the letter, useless in substance. Suitability runs in two directions, so
+    this suite gates the other one.
+
+    Per case checks (all optional, only what the case declares):
+      equity_min / equity_max   — equity class weight band
+      liquidity_min             — cash+bond floor actually achieved
+      max_single_weight         — no accidental concentration
+      max_positions             — an allocation a human could actually place
+      expect_constraints_met    — optimizer met the constraints it was given
+    """
+    results: list[EvalResult] = []
+    total = ok = 0
+
+    for case in cases:
+        profile = _build_profile(case["profile"])
+        state = run_advisory(profile, deps)
+        failures: list[str] = []
+
+        portfolio = state.portfolio
+        if portfolio is None:
+            failures.append("no portfolio produced")
+        else:
+            equity = portfolio.class_weights.get("equity", 0.0)
+            liquid = (portfolio.class_weights.get("cash", 0.0)
+                      + portfolio.class_weights.get("bond", 0.0))
+            weights = portfolio.weights
+
+            if (lo := case.get("equity_min")) is not None and equity < lo - 1e-9:
+                failures.append(f"equity {equity:.1%} below mandate floor {lo:.0%}")
+            if (hi := case.get("equity_max")) is not None and equity > hi + 1e-9:
+                failures.append(f"equity {equity:.1%} above cap {hi:.0%}")
+            if (lq := case.get("liquidity_min")) is not None and liquid < lq - 1e-9:
+                failures.append(f"cash+bond {liquid:.1%} below floor {lq:.0%}")
+            if (mx := case.get("max_single_weight")) is not None and weights:
+                top_sym, top_w = max(weights.items(), key=lambda kv: kv[1])
+                if top_w > mx + 1e-9:
+                    failures.append(f"{top_sym} holds {top_w:.1%} > cap {mx:.0%}")
+            if (mp := case.get("max_positions")) is not None:
+                held = sum(1 for w in weights.values() if w > 1e-6)
+                if held > mp:
+                    failures.append(f"{held} positions > max {mp}")
+            if case.get("expect_constraints_met") and not portfolio.metrics.get(
+                    "constraints_met", False):
+                failures.append("optimizer did not meet its own constraints")
+
+        total += 1
+        passed = not failures
+        ok += int(passed)
+        results.append(EvalResult(name=case["name"], kind="allocation_sanity",
+                                  suite=suite, passed=passed,
+                                  reason="; ".join(failures)))
+
+    metrics = {
+        "allocation_sanity_total": total,
+        "allocation_sanity_passed": ok,
+        "allocation_sanity_rate": (ok / total) if total else 1.0,
+    }
+    return results, metrics
+
+
 # ---------------------------------------------------------------------------
 # Public entry point — importable for tests
 # ---------------------------------------------------------------------------
@@ -687,6 +754,8 @@ def run_eval(suite_name_or_path: str | Path) -> tuple[list[EvalResult], dict[str
         return _run_robustness(cases, deps, suite)
     elif suite == "status_routing":
         return _run_status_routing(cases, suite)
+    elif suite == "allocation_sanity":
+        return _run_allocation_sanity(cases, deps, suite)
     else:
         # Fallback: try to auto-detect by kind of first case
         first_kind = cases[0].get("kind", "") if cases else ""
@@ -700,6 +769,8 @@ def run_eval(suite_name_or_path: str | Path) -> tuple[list[EvalResult], dict[str
             return _run_cross_border(cases, deps, suite)
         elif first_kind in ("status_routing",):
             return _run_status_routing(cases, suite)
+        elif first_kind in ("allocation_sanity",):
+            return _run_allocation_sanity(cases, deps, suite)
         else:
             return _run_golden(cases, deps, suite)
 
@@ -740,6 +811,9 @@ def run_all_suites(
     agg_metrics["status_routing_accuracy"] = agg_metrics.get(
         "status_routing.status_routing_accuracy", 1.0
     )
+    agg_metrics["allocation_sanity_rate"] = agg_metrics.get(
+        "allocation_sanity.allocation_sanity_rate", 1.0
+    )
 
     return all_results, agg_metrics
 
@@ -758,6 +832,7 @@ def _write_report(path: str | Path, results: list[EvalResult], metrics: dict) ->
         f"| injection_block_rate | {metrics.get('injection_block_rate', 0):.3f} |",
         f"| invariance_pass_rate | {metrics.get('invariance_pass_rate', 0):.3f} |",
         f"| false_positive_rate | {metrics.get('false_positive_rate', 0):.3f} |",
+        f"| allocation_sanity_rate | {metrics.get('allocation_sanity_rate', 0):.3f} |",
         f"| status_routing_accuracy | {metrics.get('status_routing_accuracy', 0):.3f} |",
         "", "| Suite | Case | Kind | Result | Reason |",
         "| --- | --- | --- | --- | --- |",
@@ -837,6 +912,13 @@ def main(argv: list[str] | None = None) -> int:
     if metrics.get("status_routing_accuracy", 1.0) < 1.0:
         hard_failures.append(
             f"status_routing_accuracy={metrics['status_routing_accuracy']:.3f} (must be 1.0)"
+        )
+    # Suitability is two-sided: every gate above catches "too risky for this
+    # investor"; this one catches "does not answer the mandate" — the 83%-cash
+    # ten-year growth portfolio that passed all of the others.
+    if metrics.get("allocation_sanity_rate", 1.0) < 1.0:
+        hard_failures.append(
+            f"allocation_sanity_rate={metrics['allocation_sanity_rate']:.3f} (must be 1.0)"
         )
 
     if hard_failures:

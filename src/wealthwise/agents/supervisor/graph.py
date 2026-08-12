@@ -53,9 +53,19 @@ _STATUS_GUARDRAIL_BLOCKED = "GUARDRAIL_BLOCKED"
 _STATUS_BUDGET_EXCEEDED = "BUDGET_EXCEEDED"
 _STATUS_DONE = "done"
 
-# Estimated jury calls per heavy node (2 clients × 1 call = 2)
-_JURY_CALLS_MACRO = 2
-_JURY_CALLS_COMPLIANCE = 2
+# Each heavy node costs one deliberation across the whole jury.
+#
+# Derived from the injected jury rather than hard-coded: the constant used to be
+# a literal 2, with the comment "2 clients × 1 call". Adding a third juror would
+# have left every budget check under-estimating the real spend by a third — a
+# cost guard that silently stops matching the cost is worse than no guard.
+_JURY_DELIBERATIONS_MACRO = 1
+_JURY_DELIBERATIONS_COMPLIANCE = 1
+
+
+def _jury_calls(deps, deliberations: int = 1) -> int:
+    """Model calls one deliberation costs: one per juror."""
+    return max(1, len(deps.jury_clients)) * deliberations
 
 
 # ---------------------------------------------------------------------------
@@ -428,13 +438,15 @@ def build_graph(deps: AdvisoryDeps):
     g.add_node("intake", _intake_node)
     g.add_node("input_guard", _input_guard_node)
     g.add_node("planner", _make_planner_node())
-    g.add_node("budget_macro", _make_budget_node("macro", _JURY_CALLS_MACRO, deps))
+    g.add_node("budget_macro", _make_budget_node(
+        "macro", _jury_calls(deps, _JURY_DELIBERATIONS_MACRO), deps))
     g.add_node("goal", _make_goal_node(deps))
     g.add_node("macro", _make_macro_node(deps))
     g.add_node("equity", _make_equity_node(deps))
     g.add_node("cap", _make_cap_node(deps))
     g.add_node("portfolio", _make_portfolio_node(deps))
-    g.add_node("budget_compliance", _make_budget_node("compliance", _JURY_CALLS_COMPLIANCE, deps))
+    g.add_node("budget_compliance", _make_budget_node(
+        "compliance", _jury_calls(deps, _JURY_DELIBERATIONS_COMPLIANCE), deps))
     g.add_node("compliance", _make_compliance_node(deps))
     g.add_node("reflection", _make_reflection_node(deps))
     g.add_node("explanation", _make_explanation_node())

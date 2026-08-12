@@ -34,13 +34,19 @@ REJECT
         exceeds C-level — a compound violation indicating the optimizer failed
         to produce even an in-principle-fixable allocation.
 
-    A portfolio with only individual-asset over-level violations (but
-    portfolio_r_level ≤ C-level) is DOWNGRADE, not REJECT, because it could
-    theoretically be zero-weighted away.
+    Note on reachability: `portfolio_r_level` is defined as the max R among held
+    assets, so "one asset over-level" implies "portfolio over-level" and the
+    compound branch is what actually fires. The asset-only DOWNGRADE case
+    described above is therefore unreachable with the current aggregate
+    definition, and the DOWNGRADE path is reached via the liquidity floor. Kept
+    explicit here so the policy and the code do not drift apart; changing
+    `portfolio_r_level` to a weighted measure would make it reachable again.
 
 Confidence
 ----------
-All rules are deterministic — confidence is always 1.0.
+All rules are deterministic — confidence is always 1.0. (compliance_node
+composes the *reported* confidence from jury agreement and whether the
+optimizer met its constraints; this value is only the rule-layer input.)
 
 Dependencies
 ------------
@@ -68,6 +74,10 @@ C_ORDER: dict[str, int] = {
     "C4": 4,
     "C5": 5,
 }
+
+# Tolerance for weight comparisons — weights are floats normalized by division,
+# so exact-equality boundaries need a little slack.
+_FLOAT_TOL: float = 1e-9
 
 # ---------------------------------------------------------------------------
 # Pure helper — importable for direct zero-miss testing
@@ -167,7 +177,10 @@ def check_suitability(
         portfolio.class_weights.get("cash", 0.0)
         + portfolio.class_weights.get("bond", 0.0)
     )
-    if liquid_weight < profile.liquidity_min:
+    # Tolerance matters here: an optimizer that lands exactly on the floor
+    # produces 0.19999999999999998, and a bare `<` then reports a shortfall of
+    # "20.00% < required 20.00%" — a violation that exists only in binary.
+    if liquid_weight < profile.liquidity_min - _FLOAT_TOL:
         violations.append(
             f"Liquidity shortfall: cash+bond weight {liquid_weight:.2%} "
             f"< required {profile.liquidity_min:.2%}"
@@ -226,10 +239,15 @@ def check_suitability(
     # 3. Disclaimer
     disclosures.append("本内容不构成投资建议，仅供参考，请结合自身情况审慎决策。")
 
-    # 4. Cross-border / FX disclosure (when investor accepts cross-border, or there is FX exposure)
-    if profile.accept_cross_border:
+    # 4. Cross-border / FX disclosure. Keyed on the *actual* holdings first —
+    #    the authorization flag says what the investor allowed, not what the
+    #    portfolio ended up holding, and the disclosure has to describe the
+    #    latter. (compliance_node quantifies the exposure on top of this.)
+    if portfolio.fx_exposure > 0:
         disclosures.append("跨境标的涉及汇率波动、通道（港股通/QDII）与税收风险。")
-    elif not profile.accept_cross_border:
+    elif profile.accept_cross_border:
+        disclosures.append("本组合当前未持有境外资产；如后续加入，将涉及汇率波动、通道与税收风险。")
+    else:
         disclosures.append("投资者未授权跨境投资，组合不得持有境外资产。")
 
     return ComplianceVerdict(
