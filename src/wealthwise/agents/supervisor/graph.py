@@ -53,6 +53,8 @@ _STATUS_GUARDRAIL_BLOCKED = "GUARDRAIL_BLOCKED"
 _STATUS_BUDGET_EXCEEDED = "BUDGET_EXCEEDED"
 _STATUS_DONE = "done"
 
+_CLASS_LABEL = {"equity": "权益", "bond": "债券", "cash": "现金", "alt": "另类"}
+
 # Each heavy node costs one deliberation across the whole jury.
 #
 # Derived from the injected jury rather than hard-coded: the constant used to be
@@ -321,12 +323,52 @@ def _make_explanation_node():
             confidence = 0.0
         else:
             # Build readable allocation summary (top 5 positions)
-            sorted_weights = sorted(portfolio.weights.items(),
-                                    key=lambda x: x[1], reverse=True)
-            top5 = sorted_weights[:5]
-            alloc_lines = ", ".join(f"{sym}: {w:.1%}" for sym, w in top5)
-            if len(sorted_weights) > 5:
-                alloc_lines += f" 及其他 {len(sorted_weights) - 5} 个标的"
+            # The holdings list is written out in full. It used to show the top
+            # five and then "及其他 59 个标的", which withholds most of the
+            # recommendation from the person being advised.
+            plan = state.execution_plan or {}
+            positions = plan.get("positions") or []
+            if positions:
+                # US venues trade in single shares, so "97 手 / 97 股" is noise
+                # dressed as precision; only say 手 where a board lot exists.
+                alloc_lines = "\n".join(
+                    f"  {p['name']}（{p['symbol']}·{p['market']}）"
+                    f" {p['weight']:.1%}　"
+                    + (f"{p['lots']} 手 / {p['shares']:,} 股"
+                       if p['lot_size'] > 1 else f"{p['shares']:,} 股")
+                    + f"　约 {p['amount']:,.0f} {p['currency']}"
+                    for p in positions
+                )
+                class_line = "　".join(
+                    f"{_CLASS_LABEL.get(k, k)} {v:.1%}"
+                    for k, v in sorted(portfolio.class_weights.items(),
+                                       key=lambda kv: -kv[1])
+                )
+                residual = plan.get("cash_residual", 0.0)
+                holdings_block = (
+                    f"大类配置：{class_line}\n"
+                    f"持仓清单（共 {len(positions)} 个标的，按最小交易单位取整）：\n"
+                    f"{alloc_lines}\n"
+                    f"买入合计约 {plan.get('invested', 0.0):,.0f} 元，"
+                    f"取整后剩余现金约 {residual:,.0f} 元。\n"
+                )
+            else:
+                sorted_weights = sorted(portfolio.weights.items(),
+                                        key=lambda x: x[1], reverse=True)
+                holdings_block = (
+                    "持仓：" + ", ".join(f"{sym} {w:.1%}" for sym, w in sorted_weights)
+                    + "。\n"
+                )
+
+            guidance = plan.get("guidance") or {}
+            guidance_block = ""
+            if guidance:
+                channels = "".join(f"  · {c}\n" for c in guidance.get("channels", []))
+                guidance_block = (
+                    f"建仓节奏：{guidance['entry']['detail']}\n"
+                    f"再平衡：{guidance['rebalance']['detail']}\n"
+                    f"交易渠道：\n{channels}"
+                )
 
             risk_ceiling = gc.get("risk_ceiling", portfolio.portfolio_r_level)
             decision = compliance.decision if compliance else "N/A"
@@ -341,9 +383,10 @@ def _make_explanation_node():
             explanation = (
                 f"根据您的风险承受等级（{profile.risk_level}）和投资目标，"
                 f"本系统建议以下资产配置方案（风险等级 {portfolio.portfolio_r_level}，"
-                f"上限 {risk_ceiling}）：\n"
-                f"主要持仓：{alloc_lines}。\n"
+                f"上限 {risk_ceiling}，本金 {profile.investable:,.0f} 元）：\n"
+                f"{holdings_block}"
                 f"投资组合境外敞口：{portfolio.fx_exposure:.1%}。\n"
+                f"{guidance_block}"
                 f"合规审核结论：{decision}。\n"
                 f"{disclosures_text}"
             )

@@ -29,6 +29,7 @@ against all three markets:
     [1]  name          [2]  code          [3]  last price
     [39] P/E (TTM)     [45] market cap (100M, local currency)
     [46] P/B  —  A-shares only; HK/US carry the English name at this position
+    [60] board lot  —  HK only
 
 `_get()` is the only method that touches the network; tests monkeypatch it.
 """
@@ -56,10 +57,18 @@ _F_PRICE = 3
 _F_PE = 39
 _F_MCAP = 45
 _F_PB = 46
+# Board lot. Only Hong Kong varies (100 / 200 / 400 / 500 / 1000 …), and it has
+# to come from the feed: an executable plan that assumes 100 shares everywhere
+# would quietly misprice a third of the HK book.
+_F_HK_LOT = 60
 
 # Shortest payload observed is the US layout at 71 fields; anything below the
 # P/E index is a truncated or error row and is skipped rather than half-parsed.
 _MIN_FIELDS = _F_PE + 1
+
+# Board lots where the feed does not carry one. Mainland shares and exchange-traded
+# funds both trade in 100s; US venues allow single shares.
+_DEFAULT_LOT = {"A": 100, "US": 1}
 
 _CURRENCY = {"A": "CNY", "HK": "HKD", "US": "USD"}
 
@@ -146,6 +155,12 @@ def _map_quote_row(fields: list[str], market: str,
         pb = _to_float(fields[_F_PB])
         if pb is not None:
             metrics["pb"] = pb
+
+    lot = None
+    if market == "HK" and len(fields) > _F_HK_LOT:
+        raw_lot = _to_float(fields[_F_HK_LOT])
+        lot = int(raw_lot) if raw_lot and raw_lot >= 1 else None
+    metrics["lot_size"] = lot if lot is not None else _DEFAULT_LOT.get(market, 1)
 
     return {
         "symbol": symbol,

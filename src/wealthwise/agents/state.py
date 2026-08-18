@@ -73,6 +73,9 @@ class AdvisoryState(BaseModel):
 
     # --- final outputs ---
     portfolio: PortfolioAllocation | None = None
+    # Whole-lot order list derived from `portfolio`, plus entry/rebalance/channel
+    # guidance. Weights alone are not executable — see portfolio/execution.py.
+    execution_plan: dict = Field(default_factory=dict)
     compliance: ComplianceVerdict | None = None
     explanation: str = ""                  # natural-language advisory explanation
     confidence: float = 0.0               # overall pipeline confidence (0..1)
