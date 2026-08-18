@@ -93,7 +93,7 @@ DONE   （返回完整 trace；开启后同步 Langfuse）
 **双重交叉验证：**
 
 - *多源共识*（支柱一）—— 宏观/量化信号从多个 AkShare 接口汇成中位数，单源读数置信封顶 0.5。
-- *多模型陪审*（支柱二）—— 合规与宏观判定交给**跨三家实验室的奇数陪审团**（GLM-4.7 智谱 / DeepSeek-V3 / Kimi-K3 Moonshot）；多数标签胜出（3/3=1.0、2/3≈0.667、三方分歧无多数记 `None`），低置信升级人工复核。奇数才有「多数」可言——两个模型只有「一致」与「平票」两种结果。**PASS 也要复核**：确定性规则只会错在「本该拦却放行」这一侧，所以 PASS 结果按 `jury_review_pass_rate` 抽样复检（默认全查），陪审依旧只能加严。
+- *多模型陪审*（支柱二）—— 合规与宏观判定交给**跨三家实验室的奇数陪审团**（GLM-4.7 智谱 / DeepSeek-V3 / Ling-flash-2.0 蚂蚁）；多数标签胜出（3/3=1.0、2/3≈0.667、三方分歧无多数记 `None`），低置信升级人工复核。奇数才有「多数」可言——两个模型只有「一致」与「平票」两种结果。**PASS 也要复核**：确定性规则只会错在「本该拦却放行」这一侧，所以 PASS 结果按 `jury_review_pass_rate` 抽样复检（默认全查），陪审依旧只能加严。
 
 **三层护栏：**
 
@@ -107,7 +107,7 @@ DONE   （返回完整 trace；开启后同步 Langfuse）
 | --- | --- |
 | API / 编排 | FastAPI · LangGraph |
 | 主模型 | **GLM-4.7**（z.ai，OpenAI 兼容） |
-| 交叉验证模型 | **DeepSeek-V3** + **Kimi-K3**（均走 SiliconFlow）—— 与 GLM 合成跨三家实验室的奇数陪审团 |
+| 交叉验证模型 | **DeepSeek-V3** + **Ling-flash-2.0**（均走 SiliconFlow）—— 与 GLM 合成跨三家实验室的奇数陪审团 |
 | 真实行情 | **AkShare**（A/港/美股、基金、宏观、汇率） |
 | 离线运行时 | 样例 Provider + 本地哈希嵌入 + 内存向量库 + 离线陪审（零 key、零网络） |
 | RAG | 内存余弦向量库 + 本地哈希嵌入；检索宏观上下文与合规/研报语料 |
@@ -278,7 +278,7 @@ intake → input_guard → planner → budget_macro → macro → equity
 | `GLM_API_KEY` / `GLM_BASE_URL` | 主模型（GLM-4.7，z.ai OpenAI 兼容网关） |
 | `SILICONFLOW_API_KEY` | 交叉验证陪审模型 key（SiliconFlow） |
 | `CROSSCHECK_MODEL` | 第二陪审员（默认 `deepseek-ai/DeepSeek-V3`） |
-| `THIRD_MODEL` | 第三陪审员（默认 `moonshotai/Kimi-K3`，走 SiliconFlow，凑成奇数陪审团）；设空串回退两模型档 |
+| `THIRD_MODEL` | 第三陪审员（默认 `inclusionAI/Ling-flash-2.0`，走 SiliconFlow，凑成奇数陪审团）；设空串回退两模型档 |
 | `ENABLE_LANGFUSE_TRACING` | `true` 向 Langfuse 发送 trace |
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | Langfuse 项目凭证 |
 | `LANGFUSE_BASE_URL` | Langfuse 端点（默认 `https://us.cloud.langfuse.com`） |

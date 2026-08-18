@@ -121,7 +121,7 @@ DONE   (full trace returned; Langfuse synced if enabled)
 | --- | --- |
 | API / orchestration | FastAPI · LangGraph |
 | Primary model | **GLM-4.7** (z.ai, OpenAI-compatible) |
-| Cross-check model | **DeepSeek-V3** + **Kimi-K3** (both via SiliconFlow) — an odd, three-lab jury with GLM |
+| Cross-check model | **DeepSeek-V3** + **Ling-flash-2.0** (both via SiliconFlow) — an odd, three-lab jury with GLM |
 | Real market data | **AkShare** (A/HK/US equity, fixed income, macro, FX) |
 | Offline runtime | Sample provider + local hash embedding + in-memory vector store + offline jury (zero keys, zero network) |
 | RAG | In-memory cosine store + local hash embedding; retrieves macro context and compliance/research corpus |

@@ -6,7 +6,7 @@ from wealthwise.llm import ModelClient, OpenAICompatibleModelClient
 def build_jury_clients(settings: Settings) -> list[ModelClient]:
     """Assemble the jury: GLM primary + two cross-lab SiliconFlow jurors.
 
-    Three labs (Zhipu / DeepSeek / Moonshot) on purpose. Same-lab models share
+    Three labs (Zhipu / DeepSeek / Ant) on purpose. Same-lab models share
     their failure modes, so cross-validation between them degrades into
     self-endorsement — and an *even* jury has no majority to speak of: two models
     either agree or tie. An odd jury restores the three outcomes the

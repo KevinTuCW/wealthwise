@@ -28,15 +28,15 @@ def _capture(monkeypatch):
 
 def test_build_jury_clients_from_settings(monkeypatch):
     captured = _capture(monkeypatch)
-    clients = jury.build_jury_clients(_settings(third_model="moonshotai/Kimi-K3"))
+    clients = jury.build_jury_clients(_settings(third_model="inclusionAI/Ling-flash-2.0"))
 
     assert [c.name for c in clients] == [
-        "glm-4.7", "deepseek-ai/DeepSeek-V3", "moonshotai/Kimi-K3"]
+        "glm-4.7", "deepseek-ai/DeepSeek-V3", "inclusionAI/Ling-flash-2.0"]
     assert [c[:4] for c in captured] == [
         ("glm-4.7", "glm-4.7", "https://api.z.ai/api/paas/v4/", "k1"),
         ("deepseek-ai/DeepSeek-V3", "deepseek-ai/DeepSeek-V3",
          "https://api.siliconflow.com/v1", "k2"),
-        ("moonshotai/Kimi-K3", "moonshotai/Kimi-K3",
+        ("inclusionAI/Ling-flash-2.0", "inclusionAI/Ling-flash-2.0",
          "https://api.siliconflow.com/v1", "k2"),
     ]
 
@@ -44,7 +44,7 @@ def test_build_jury_clients_from_settings(monkeypatch):
 def test_thinking_disabled_uses_each_vendors_own_field(monkeypatch):
     """z.ai and SiliconFlow spell the switch differently; sending the wrong one is a no-op."""
     captured = _capture(monkeypatch)
-    jury.build_jury_clients(_settings(third_model="moonshotai/Kimi-K3"))
+    jury.build_jury_clients(_settings(third_model="inclusionAI/Ling-flash-2.0"))
 
     assert captured[0][4]["extra_body"] == {"thinking": {"type": "disabled"}}   # z.ai
     for juror in captured[1:]:                                                  # SiliconFlow
@@ -61,7 +61,7 @@ def test_thinking_can_be_re_enabled(monkeypatch):
 
 def test_jury_is_odd_so_a_majority_can_exist(monkeypatch):
     _capture(monkeypatch)
-    clients = jury.build_jury_clients(_settings(third_model="moonshotai/Kimi-K3"))
+    clients = jury.build_jury_clients(_settings(third_model="inclusionAI/Ling-flash-2.0"))
     assert len(clients) % 2 == 1
 
 

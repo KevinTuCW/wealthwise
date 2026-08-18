@@ -22,12 +22,21 @@ class Settings(BaseSettings):
     siliconflow_api_key: str = ""
     siliconflow_base_url: str = "https://api.siliconflow.com/v1"
     crosscheck_model: str = "deepseek-ai/DeepSeek-V3"    # cross-lab judge, distinct from GLM
-    # Third juror, also on SiliconFlow. Three labs (Zhipu / DeepSeek / Moonshot)
-    # give the vote an actual majority: two models can only agree (confidence 1.0)
-    # or tie (label=None), so "多数标签胜出" described something that never
-    # happened. An odd jury makes 3/3, 2/3 and no-majority three distinct
-    # outcomes. Set to "" to fall back to the two-model configuration.
-    third_model: str = "moonshotai/Kimi-K3"
+    # Third juror, also on SiliconFlow. Three labs (Zhipu / DeepSeek / Ant) give
+    # the vote an actual majority: two models can only agree (confidence 1.0) or
+    # tie (label=None), so "多数标签胜出" described something that never happened.
+    # An odd jury makes 3/3, 2/3 and no-majority three distinct outcomes. Set to
+    # "" to fall back to the two-model configuration.
+    #
+    # Was moonshotai/Kimi-K3, which dominated advisory latency at 7–47s per call
+    # with no upper bound worth trusting. Ling-flash-2.0 returned identical
+    # verdicts on all eight benchmark cases — four clean portfolios it correctly
+    # passed, four violating ones it correctly caught — at ~1.6s. Kimi-K2.6 is
+    # equally fast and was rejected: it downgraded two of the four clean
+    # portfolios. Since the jury can only tighten a verdict, a juror biased
+    # toward DOWNGRADE never leaks, it just routes every clean advisory to human
+    # review, which fails the product instead of the investor.
+    third_model: str = "inclusionAI/Ling-flash-2.0"
     # Jurors classify into a closed label set, where extended reasoning cost 30–60s
     # per call without changing the verdict. Off by default; set false to restore
     # it if a future juror is found to need it.
