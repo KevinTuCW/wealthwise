@@ -4,8 +4,8 @@ Run manually when index constituents change (roughly quarterly):
 
     PYTHONPATH=src .venv/bin/python scripts/refresh_universe.py
 
-A-shares come from the CSI 300 constituent list published by China Securities
-Index (host `csindex.com.cn`, reached via akshare) — a different host from the
+A-shares come from the CSI 300 + CSI 500 constituent lists published by China
+Securities Index (host `csindex.com.cn`, reached via akshare) — a different host from the
 eastmoney screener this provider replaced, and reachable where that one is not.
 
 HK and US are curated large-cap lists. There is no equally clean free
@@ -31,7 +31,10 @@ from wealthwise.providers.tencent_provider import (  # noqa: E402
 )
 from wealthwise.providers.universe import DEFAULT_UNIVERSE_PATH, Universe  # noqa: E402
 
-CSI300_INDEX = "000300"
+# CSI 300 + CSI 500 = the CSI 800, the standard large- and mid-cap A-share
+# universe. CSI 300 alone was too narrow to select from once the screener
+# started ranking rather than taking whatever came first.
+A_INDEXES = ("000300", "000905")
 
 # Hang Seng large caps across the main sectors (tech, financials, energy,
 # property, consumer) — the HK slice an advisory portfolio would draw from.
@@ -64,15 +67,24 @@ US_SYMBOLS = [
 ]
 
 
-def fetch_csi300() -> list[str]:
-    """Return CSI 300 constituent codes from the index publisher."""
+def fetch_a_universe() -> list[str]:
+    """Return CSI 800 constituent codes from the index publisher."""
     import akshare as ak
 
-    df = ak.index_stock_cons_csindex(symbol=CSI300_INDEX)
-    for column in ("成分券代码", "品种代码", "成分股代码"):
-        if column in df.columns:
-            return [str(v).zfill(6) for v in df[column].tolist()]
-    raise SystemExit(f"unexpected constituent columns: {list(df.columns)}")
+    codes: list[str] = []
+    seen: set[str] = set()
+    for index in A_INDEXES:
+        df = ak.index_stock_cons_csindex(symbol=index)
+        column = next((c for c in ("成分券代码", "品种代码", "成分股代码")
+                       if c in df.columns), None)
+        if column is None:
+            raise SystemExit(f"unexpected constituent columns: {list(df.columns)}")
+        for value in df[column].tolist():
+            code = str(value).zfill(6)
+            if code not in seen:
+                seen.add(code)
+                codes.append(code)
+    return codes
 
 
 def verify(symbols: list[str], market: str) -> tuple[list[str], list[str]]:
@@ -92,7 +104,7 @@ def main() -> int:
     universe: dict[str, dict[str, list[str]]] = {}
     total = 0
     for asset_class, market, symbols in (
-        ("equity", "A", fetch_csi300()),
+        ("equity", "A", fetch_a_universe()),
         ("equity", "HK", HK_SYMBOLS),
         ("equity", "US", US_SYMBOLS),
         ("bond", "A", BOND_SYMBOLS),

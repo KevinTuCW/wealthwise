@@ -620,3 +620,103 @@ class TestComplianceNode:
             assert "汇率" in combined or "跨境" in combined or "FX" in combined.upper(), (
                 f"Expected FX/cross-border disclosure, got: {result['compliance'].disclosures}"
             )
+
+
+# ---------------------------------------------------------------------------
+# equity_node — geographic quota + quality selection
+# ---------------------------------------------------------------------------
+
+class TestEquitySelection:
+    """Selection used to be `list[:50]` over concatenated per-market screens,
+    which handed every slot to whichever market was screened first."""
+
+    def _candidate(self, symbol, market, cap_100m=500.0, pe=15.0):
+        from wealthwise.agents.state import AssetCandidate
+
+        metrics = {}
+        if pe is not None:
+            metrics["pe"] = pe
+        if cap_100m is not None:
+            metrics["market_cap_100m"] = cap_100m
+        return AssetCandidate(symbol=symbol, market=market, asset_class="equity",
+                              name=symbol, currency="CNY", r_level="R3",
+                              metrics=metrics)
+
+    def test_每个市场都拿到名额(self):
+        from wealthwise.agents.experts.equity import _select
+
+        pool = ([self._candidate(f"A{i}", "A") for i in range(300)]
+                + [self._candidate(f"H{i}", "HK") for i in range(30)]
+                + [self._candidate(f"U{i}", "US") for i in range(30)])
+        got = _select(pool, ["A", "HK", "US"], 50)
+
+        counts = {m: sum(1 for c in got if c.market == m) for m in ("A", "HK", "US")}
+        assert sum(counts.values()) == 50
+        assert counts["HK"] > 0 and counts["US"] > 0, (
+            f"cross-border sleeves were squeezed out: {counts}")
+        assert counts["A"] > counts["HK"], "A-shares should still be the core"
+
+    def test_单市场时名额全给它(self):
+        from wealthwise.agents.experts.equity import _select
+
+        pool = [self._candidate(f"A{i}", "A") for i in range(300)]
+        got = _select(pool, ["A"], 50)
+        assert len(got) == 50
+        assert all(c.market == "A" for c in got)
+
+    def test_市场候选不足时名额转给其他市场(self):
+        from wealthwise.agents.experts.equity import _select
+
+        pool = ([self._candidate(f"A{i}", "A") for i in range(300)]
+                + [self._candidate("H0", "HK")]
+                + [self._candidate(f"U{i}", "US") for i in range(30)])
+        got = _select(pool, ["A", "HK", "US"], 50)
+        assert len(got) == 50, "unused HK quota should be spent, not lost"
+
+    def test_按规模排序而非按顺序(self):
+        from wealthwise.agents.experts.equity import _select
+
+        # Caps kept above the size floor so this exercises ranking, not filtering.
+        pool = [self._candidate(f"A{i}", "A", cap_100m=100.0 * i) for i in range(1, 101)]
+        got = _select(pool, ["A"], 5)
+        assert [c.symbol for c in got] == ["A100", "A99", "A98", "A97", "A96"]
+
+    def test_亏损与微盘被剔除(self):
+        from wealthwise.agents.experts.equity import _select
+
+        pool = [
+            self._candidate("GOOD", "A", cap_100m=500.0, pe=12.0),
+            self._candidate("LOSS", "A", cap_100m=500.0, pe=-3.0),   # 亏损
+            self._candidate("TINY", "A", cap_100m=5.0, pe=12.0),     # 规模不足
+        ]
+        assert [c.symbol for c in _select(pool, ["A"], 10)] == ["GOOD"]
+
+    def test_缺失指标不等于不合格(self):
+        """Provider coverage varies; silence must not empty the candidate set."""
+        from wealthwise.agents.experts.equity import _select
+
+        pool = [self._candidate(f"A{i}", "A", cap_100m=None, pe=None) for i in range(5)]
+        assert len(_select(pool, ["A"], 10)) == 5
+
+    def test_不同provider的市值字段都能读(self):
+        from wealthwise.agents.state import AssetCandidate
+        from wealthwise.agents.experts.equity import _market_cap_100m
+
+        tencent = AssetCandidate(symbol="X", market="A", asset_class="equity",
+                                 name="X", currency="CNY", r_level="R3",
+                                 metrics={"market_cap_100m": 3500.0})
+        sample = AssetCandidate(symbol="Y", market="A", asset_class="equity",
+                                name="Y", currency="CNY", r_level="R3",
+                                metrics={"market_cap_cny": 350_000_000_000})
+        assert _market_cap_100m(tencent) == 3500.0
+        assert _market_cap_100m(sample) == 3500.0
+
+    def test_未筛市场的标的必须放行到合规(self):
+        """A leaked cross-border name must reach compliance, not vanish here."""
+        from wealthwise.agents.experts.equity import _select
+
+        pool = ([self._candidate(f"A{i}", "A") for i in range(100)]
+                + [self._candidate("LEAK", "US")])
+        got = _select(pool, ["A"], 10)
+        assert "LEAK" in [c.symbol for c in got], (
+            "dropping an unauthorised holding hides the violation instead of rejecting it")
