@@ -332,23 +332,20 @@ def sse_events(profile: InvestorProfile | None, deps: AdvisoryDeps,
     """Yield SSE-formatted events while the advisory pipeline runs.
 
     Events emitted:
-      - "start"    — immediately, carrying the profile summary.
-      - "node"     — once per LangGraph node as it completes; carries node
-                     name + state patch.
-      - "complete" — final event, carrying the full five-panel dashboard built from
-                     the FULLY accumulated final state (accurate trace_event_count,
-                     cost, and all list fields).
+      - "start"      — immediately, carrying the profile summary.
+      - "node_start" — as each LangGraph node begins; carries the node name only.
+      - "node"       — once per node as it completes; carries name + state patch.
+      - "complete"   — final event, carrying the full five-panel dashboard built
+                       from the fully accumulated final state.
 
     Each event is formatted as:  event: <name>\\ndata: <json>\\n\\n
     (matching shopscout's SSE framing exactly).
 
-    Implementation note: per-node patches are streamed for real-time UI animation,
-    but the complete-event dashboard is built by invoking the pipeline a second time
-    (graph.invoke) so that all list fields (trace_events, notes, candidates) are
-    fully accumulated rather than replaced by the last patch.  The two invocations
-    are deterministic given the same deps (offline mode).  In real-provider mode the
-    second invoke produces an independent run — callers should be aware of this if
-    auditability of the exact streamed run matters more than completeness.
+    "node_start" exists because node events fire on *completion*, which makes the
+    stream silent for exactly as long as a node is slow. Against real providers
+    the jury-backed nodes take 12–50s each, so the run showed a burst of instant
+    nodes and then nothing at all for the part that actually takes the time —
+    a progress stream that goes quiet precisely when progress is worth reporting.
     """
     if settings is None:
         from wealthwise.config import get_settings
@@ -367,18 +364,35 @@ def sse_events(profile: InvestorProfile | None, deps: AdvisoryDeps,
 
     yield _sse("start", {"profile": profile_desc})
 
-    # Stream per-node progress events for UI animation
-    for update in graph.stream(initial, stream_mode="updates"):
-        for node, patch in update.items():
-            payload = {"node": node, **_safe_patch(patch)}
-            yield _sse("node", payload)
+    # Three stream modes in one pass: "debug" fires a task event *before* each
+    # node runs (the only pre-execution signal LangGraph exposes), "updates"
+    # carries the state patch as each node finishes, and "values" carries the
+    # fully accumulated state. Taking the last "values" chunk gives the same
+    # final state a plain .invoke() would produce, with lists properly
+    # accumulated.
+    #
+    # This used to stream "updates" only and then re-run the entire pipeline to
+    # get an accurate final state. Offline that was merely wasteful; against real
+    # providers it ran a second, *independent* advisory — doubling latency and
+    # jury spend, and rendering a dashboard belonging to a different run than the
+    # one the user had just watched and than the trace recorded against it. An
+    # advisory that cannot be tied back to the run that produced it is not
+    # auditable, which is the one property this pipeline cannot trade away.
+    final_values: dict | None = None
+    for mode, chunk in graph.stream(initial,
+                                    stream_mode=["debug", "updates", "values"]):
+        if mode == "debug":
+            if chunk.get("type") == "task":
+                name = chunk.get("payload", {}).get("name")
+                if name:
+                    yield _sse("node_start", {"node": name})
+        elif mode == "updates":
+            for node, patch in chunk.items():
+                yield _sse("node", {"node": node, **_safe_patch(patch)})
+        else:
+            final_values = chunk
 
-    # Obtain the fully accumulated final state via a complete invoke so that
-    # list fields (trace_events, notes, equity_candidates…) are correctly
-    # accumulated — simple dict.update() on patches would replace lists rather
-    # than appending them, producing inaccurate trace_event_count and cost totals.
-    from wealthwise.runner import run_advisory
-    final = run_advisory(profile, deps)
+    final = AdvisoryState.model_validate(final_values or initial)
     yield _sse("complete", build_dashboard(final, settings))
 
 

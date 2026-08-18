@@ -453,6 +453,7 @@
 
     // ---- Streaming run ----
     let activeSource = null;
+    let streamTicker = null;
     function streamRun() {
       if (activeSource) { activeSource.close(); activeSource = null; }
       const p = collectProfile();
@@ -468,22 +469,58 @@
       byId("pipeline-log").innerHTML = "";
       const src = new EventSource(`/workbench/stream?${params}`);
       activeSource = src;
+
+      // The jury-backed nodes take tens of seconds each and emit nothing until
+      // they finish, so without a ticking elapsed time the page is
+      // indistinguishable from a hung request. Driven by node_start, which
+      // fires before the node runs.
+      let profileDesc = "";
+      let currentNode = null;
+      let nodeStartedAt = 0;
+      if (streamTicker) { clearInterval(streamTicker); streamTicker = null; }
+      const paintStatus = () => {
+        if (!currentNode) return;
+        const secs = ((Date.now() - nodeStartedAt) / 1000).toFixed(0);
+        setStatus(`运行中 — ${profileDesc} · ${currentNode} (${secs}s)`);
+      };
+      streamTicker = setInterval(paintStatus, 1000);
+      const stopTicker = () => {
+        if (streamTicker) { clearInterval(streamTicker); streamTicker = null; }
+      };
+
       src.addEventListener("start", (e) => {
-        setStatus("管线已启动 — " + JSON.parse(e.data).profile);
+        profileDesc = JSON.parse(e.data).profile;
+        setStatus("管线已启动 — " + profileDesc);
+      });
+      src.addEventListener("node_start", (e) => {
+        currentNode = JSON.parse(e.data).node;
+        nodeStartedAt = Date.now();
+        paintStatus();
+        const entry = document.createElement("div");
+        entry.className = "node-entry";
+        entry.id = "pending-node";
+        entry.innerHTML = `<span class="node-name">${esc(currentNode)}</span> — 运行中…`;
+        byId("pipeline-log").prepend(entry);
       });
       src.addEventListener("node", (e) => {
         const d = JSON.parse(e.data);
+        const pending = byId("pending-node");
+        if (pending) pending.remove();
         const entry = document.createElement("div");
         entry.className = "node-entry";
         entry.innerHTML = `<span class="node-name">${esc(d.node)}</span> — ${esc(JSON.stringify(d).slice(0, 120))}`;
         byId("pipeline-log").prepend(entry);
       });
       src.addEventListener("complete", (e) => {
+        stopTicker();
+        const pending = byId("pending-node");
+        if (pending) pending.remove();
         src.close();
         activeSource = null;
         renderDashboard(JSON.parse(e.data));
       });
       src.onerror = () => {
+        stopTicker();
         setStatus("SSE 连接错误");
         src.close();
         activeSource = null;

@@ -424,3 +424,127 @@ class TestSseEventsFinalStateAccuracy:
         sse_dash = json.loads(data_line[len("data: "):])
 
         assert sse_dash["status"] == direct_state.status
+
+
+# ---------------------------------------------------------------------------
+# sse_events runs the pipeline exactly once
+# ---------------------------------------------------------------------------
+
+class TestStreamRunsPipelineOnce:
+    """The streamed dashboard must describe the run the client just watched.
+
+    The generator used to stream node updates and then re-invoke the whole graph
+    to build the final dashboard. With real providers that second invoke is an
+    independent advisory: double the latency and jury spend, and a dashboard that
+    does not correspond to the streamed run or to its trace.
+    """
+
+    def _profile(self):
+        from wealthwise.agents.state import InvestorProfile
+
+        return InvestorProfile(
+            risk_level="C3", investable=500_000.0, horizon_years=5,
+            goals=["balanced_growth"], liquidity_min=0.2, accept_cross_border=True,
+        )
+
+    def test_graph_is_invoked_once(self, monkeypatch):
+        from wealthwise.bootstrap import build_sample_deps
+        from wealthwise.config import get_settings
+        import wealthwise.workbench as wb
+
+        deps = build_sample_deps()
+        real_build = wb.build_graph
+        runs = {"stream": 0, "invoke": 0}
+
+        def counting_build_graph(d):
+            graph = real_build(d)
+            real_stream, real_invoke = graph.stream, graph.invoke
+
+            def stream(*a, **kw):
+                runs["stream"] += 1
+                return real_stream(*a, **kw)
+
+            def invoke(*a, **kw):
+                runs["invoke"] += 1
+                return real_invoke(*a, **kw)
+
+            graph.stream, graph.invoke = stream, invoke
+            return graph
+
+        monkeypatch.setattr(wb, "build_graph", counting_build_graph)
+        list(sse_events(self._profile(), deps, get_settings()))
+
+        assert runs["stream"] == 1
+        assert runs["invoke"] == 0, "the pipeline must not be re-run to build the dashboard"
+
+    def test_streamed_dashboard_matches_a_direct_run(self):
+        from wealthwise.bootstrap import build_sample_deps
+        from wealthwise.config import get_settings
+        from wealthwise.runner import run_advisory
+
+        deps, settings = build_sample_deps(), get_settings()
+        profile = self._profile()
+
+        events = list(sse_events(profile, deps, settings))
+        complete = [e for e in events if e.startswith("event: complete")]
+        assert len(complete) == 1
+        streamed = json.loads(complete[0].split("data: ", 1)[1])
+
+        reference = build_dashboard(run_advisory(profile, deps), settings)
+        # trace_event_count and the token totals are exactly the accumulated-list
+        # fields the discarded second invoke existed to get right.
+        assert streamed["cost"]["trace_event_count"] == reference["cost"]["trace_event_count"]
+        assert streamed["cost"]["tokens_used"] == reference["cost"]["tokens_used"]
+        assert streamed["cost"]["node_count"] == reference["cost"]["node_count"]
+        assert streamed["status"] == reference["status"]
+        assert streamed["allocation"]["weights"] == reference["allocation"]["weights"]
+
+
+class TestNodeStartEvents:
+    """Nodes emit on completion, so a slow node makes the stream silent.
+
+    node_start is the only signal the UI has that a long jury call is in flight
+    rather than the connection being dead.
+    """
+
+    def _profile(self):
+        from wealthwise.agents.state import InvestorProfile
+
+        return InvestorProfile(
+            risk_level="C3", investable=500_000.0, horizon_years=5,
+            goals=["balanced_growth"], liquidity_min=0.2, accept_cross_border=True,
+        )
+
+    def _events(self):
+        from wealthwise.bootstrap import build_sample_deps
+        from wealthwise.config import get_settings
+
+        return list(sse_events(self._profile(), build_sample_deps(), get_settings()))
+
+    def test_every_node_announces_itself_before_it_completes(self):
+        events = self._events()
+        order = []
+        for raw in events:
+            kind = raw.split("\n", 1)[0].removeprefix("event: ")
+            if kind in ("node_start", "node"):
+                order.append((kind, json.loads(raw.split("data: ", 1)[1])["node"]))
+
+        started = [n for k, n in order if k == "node_start"]
+        completed = [n for k, n in order if k == "node"]
+        assert started, "no node_start events were emitted"
+        assert started == completed, "each node should start and complete exactly once, in order"
+
+        # And the start must precede the completion for the *same* occurrence.
+        seen_starts: list[str] = []
+        for kind, node in order:
+            if kind == "node_start":
+                seen_starts.append(node)
+            else:
+                assert node in seen_starts, f"{node} completed without announcing a start"
+                seen_starts.remove(node)
+
+    def test_node_start_carries_only_the_name(self):
+        """It fires before execution, so there is no state to report yet."""
+        for raw in self._events():
+            if raw.startswith("event: node_start"):
+                assert json.loads(raw.split("data: ", 1)[1]).keys() == {"node"}
