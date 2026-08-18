@@ -31,6 +31,7 @@ Deps are bound at graph-build time via closures (same pattern as shopscout).
 from __future__ import annotations
 
 import time
+from dataclasses import asdict
 
 from langgraph.graph import END, START, StateGraph
 
@@ -47,6 +48,8 @@ from wealthwise.guardrails.input import screen_profile
 from wealthwise.guardrails.output import STATUS_NEEDS_REVIEW, enforce_output
 from wealthwise.guardrails.process import cap_candidates
 from wealthwise.obs import traced
+from wealthwise.portfolio.execution import build_execution_plan, realised_allocation
+from wealthwise.portfolio.guidance import build_guidance
 
 # Status constants
 _STATUS_GUARDRAIL_BLOCKED = "GUARDRAIL_BLOCKED"
@@ -317,16 +320,35 @@ def _make_explanation_node():
         portfolio = state.portfolio
         compliance = state.compliance
         gc = state.goal_constraints
+        all_candidates = list(state.equity_candidates) + list(state.fixedincome_candidates)
 
+        plan_payload: dict = {}
         if profile is None or portfolio is None:
             explanation = "本次咨询因输入不完整，无法生成投资建议。不构成投资建议。"
             confidence = 0.0
         else:
             # Build readable allocation summary (top 5 positions)
-            # The holdings list is written out in full. It used to show the top
-            # five and then "及其他 59 个标的", which withholds most of the
-            # recommendation from the person being advised.
-            plan = state.execution_plan or {}
+            # Build the order list here, *after* compliance has ruled on the
+            # proposal. Deriving it earlier and handing compliance the rounded
+            # result read as the more auditable order, and was the opposite: an
+            # unauthorised cross-border holding small enough to be rounded away
+            # left a clean portfolio behind, so compliance returned PASS on a
+            # book that should have been rejected. Rounding must not be able to
+            # launder a violation. Compliance judges the recommendation;
+            # execution implements the recommendation it approved.
+            plan_obj = build_execution_plan(portfolio, all_candidates,
+                                            profile.investable)
+            plan = {}
+            if plan_obj.positions:
+                plan = {
+                    "positions": [asdict(p) for p in plan_obj.positions],
+                    "cash_residual": round(plan_obj.cash_residual, 2),
+                    "invested": round(plan_obj.invested, 2),
+                    "investable": profile.investable,
+                    "dropped": plan_obj.dropped,
+                    "guidance": build_guidance(profile, portfolio, plan_obj),
+                    "realised": realised_allocation(portfolio, plan_obj).model_dump(),
+                }
             positions = plan.get("positions") or []
             if positions:
                 # US venues trade in single shares, so "97 手 / 97 股" is noise
@@ -360,6 +382,7 @@ def _make_explanation_node():
                     + "。\n"
                 )
 
+            plan_payload = plan
             guidance = plan.get("guidance") or {}
             guidance_block = ""
             if guidance:
@@ -407,6 +430,7 @@ def _make_explanation_node():
         )
 
         return {
+            "execution_plan": plan_payload,
             "explanation": explanation,
             "confidence": confidence,
             "status": new_status,

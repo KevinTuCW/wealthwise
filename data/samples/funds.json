@@ -7,11 +7,17 @@
     "asset_class": "equity",
     "r_level": "R3",
     "metrics": {
-      "volatility": 0.20,
+      "volatility": 0.2,
       "tracking_error": 0.005,
-      "aum_cny": 120000000000
+      "aum_cny": 120000000000,
+      "price": 4.787,
+      "lot_size": 100
     },
-    "tags": ["ETF", "宽基", "大盘"]
+    "tags": [
+      "ETF",
+      "宽基",
+      "大盘"
+    ]
   },
   {
     "symbol": "159915",
@@ -23,9 +29,15 @@
     "metrics": {
       "volatility": 0.35,
       "tracking_error": 0.006,
-      "aum_cny": 25000000000
+      "aum_cny": 25000000000,
+      "price": 3.723,
+      "lot_size": 100
     },
-    "tags": ["ETF", "创业板", "成长"]
+    "tags": [
+      "ETF",
+      "创业板",
+      "成长"
+    ]
   },
   {
     "symbol": "003358",
@@ -36,9 +48,15 @@
     "r_level": "R3",
     "metrics": {
       "volatility": 0.22,
-      "annual_return_3y": 0.08
+      "annual_return_3y": 0.08,
+      "price": 1.2,
+      "lot_size": 1,
+      "quote_basis": "synthetic"
     },
-    "tags": ["主动权益", "消费"]
+    "tags": [
+      "主动权益",
+      "消费"
+    ]
   },
   {
     "symbol": "519736",
@@ -51,9 +69,15 @@
       "yield": 0.032,
       "duration": 3.2,
       "volatility": 0.028,
-      "credit_rating": "AAA"
+      "credit_rating": "AAA",
+      "price": 1.2,
+      "lot_size": 1,
+      "quote_basis": "synthetic"
     },
-    "tags": ["纯债", "利率债"]
+    "tags": [
+      "纯债",
+      "利率债"
+    ]
   },
   {
     "symbol": "000271",
@@ -65,10 +89,16 @@
     "metrics": {
       "yield": 0.031,
       "duration": 4.1,
-      "volatility": 0.030,
-      "credit_rating": "AAA"
+      "volatility": 0.03,
+      "credit_rating": "AAA",
+      "price": 1.2,
+      "lot_size": 1,
+      "quote_basis": "synthetic"
     },
-    "tags": ["纯债", "利率债"]
+    "tags": [
+      "纯债",
+      "利率债"
+    ]
   },
   {
     "symbol": "161716",
@@ -81,9 +111,14 @@
       "yield": 0.038,
       "duration": 2.8,
       "volatility": 0.025,
-      "credit_rating": "AA+"
+      "credit_rating": "AA+",
+      "price": 1.659,
+      "lot_size": 100
     },
-    "tags": ["信用债", "中短期"]
+    "tags": [
+      "信用债",
+      "中短期"
+    ]
   },
   {
     "symbol": "000198",
@@ -95,9 +130,15 @@
     "metrics": {
       "yield": 0.025,
       "volatility": 0.002,
-      "duration": 0.08
+      "duration": 0.08,
+      "price": 1.0,
+      "lot_size": 1,
+      "quote_basis": "synthetic"
     },
-    "tags": ["货币基金", "流动性"]
+    "tags": [
+      "货币基金",
+      "流动性"
+    ]
   },
   {
     "symbol": "000009",
@@ -109,9 +150,15 @@
     "metrics": {
       "yield": 0.024,
       "volatility": 0.002,
-      "duration": 0.07
+      "duration": 0.07,
+      "price": 1.0,
+      "lot_size": 1,
+      "quote_basis": "synthetic"
     },
-    "tags": ["货币基金", "流动性"]
+    "tags": [
+      "货币基金",
+      "流动性"
+    ]
   },
   {
     "symbol": "VXUS",
@@ -123,9 +170,15 @@
     "metrics": {
       "volatility": 0.18,
       "pe": 14.0,
-      "dividend_yield": 0.028
+      "dividend_yield": 0.028,
+      "price": 86.89,
+      "lot_size": 1
     },
-    "tags": ["ETF", "国际股票", "QDII参考"]
+    "tags": [
+      "ETF",
+      "国际股票",
+      "QDII参考"
+    ]
   },
   {
     "symbol": "005918",
@@ -137,9 +190,15 @@
     "metrics": {
       "volatility": 0.22,
       "annual_return_3y": 0.07,
-      "fx_exposure": 1.0
+      "fx_exposure": 1.0,
+      "price": 1.2,
+      "lot_size": 1,
+      "quote_basis": "synthetic"
     },
-    "tags": ["QDII", "全球股票"]
+    "tags": [
+      "QDII",
+      "全球股票"
+    ]
   },
   {
     "symbol": "000934",
@@ -152,8 +211,14 @@
       "yield": 0.042,
       "duration": 5.5,
       "volatility": 0.06,
-      "fx_exposure": 1.0
+      "fx_exposure": 1.0,
+      "price": 1.2,
+      "lot_size": 1,
+      "quote_basis": "synthetic"
     },
-    "tags": ["QDII", "全球债券"]
+    "tags": [
+      "QDII",
+      "全球债券"
+    ]
   }
 ]

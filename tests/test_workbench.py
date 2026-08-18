@@ -548,3 +548,46 @@ class TestNodeStartEvents:
         for raw in self._events():
             if raw.startswith("event: node_start"):
                 assert json.loads(raw.split("data: ", 1)[1]).keys() == {"node"}
+
+
+class TestExecutionPanel:
+    """The five original panels describe the decision; none says what to buy."""
+
+    def _dash(self):
+        from wealthwise.agents.state import InvestorProfile
+        from wealthwise.bootstrap import build_sample_deps
+        from wealthwise.runner import run_advisory
+
+        profile = InvestorProfile(
+            risk_level="C4", investable=800_000.0, horizon_years=7,
+            goals=["balanced_growth"], liquidity_min=0.15, accept_cross_border=True,
+        )
+        state = run_advisory(profile, build_sample_deps())
+        return build_dashboard(state, get_settings())
+
+    def test_dashboard_carries_the_order_list(self):
+        ex = self._dash()["execution"]
+        assert ex["position_count"] > 0, "offline demo produced no executable plan"
+        for key in ("positions", "invested", "cash_residual", "guidance"):
+            assert key in ex
+
+    def test_every_position_is_placeable(self):
+        for p in self._dash()["execution"]["positions"]:
+            assert p["shares"] > 0 and p["shares"] % p["lot_size"] == 0
+            assert p["amount"] > 0
+            assert p["name"] and p["symbol"] and p["market"]
+
+    def test_guidance_reaches_the_ui(self):
+        g = self._dash()["execution"]["guidance"]
+        assert g["entry"]["detail"] and g["rebalance"]["detail"]
+        assert g["channels"], "no channel guidance surfaced"
+
+    def test_offline_sample_data_can_price_every_instrument(self):
+        """The demo path is the repo's headline; it must not degrade to weights."""
+        from wealthwise.bootstrap import build_sample_deps
+
+        market = build_sample_deps().market
+        for asset_class in ("equity", "bond", "cash"):
+            for c in market.screen("A", {"asset_class": asset_class}):
+                assert c.metrics.get("price"), f"{c.symbol} has no price"
+                assert c.metrics.get("lot_size"), f"{c.symbol} has no lot size"

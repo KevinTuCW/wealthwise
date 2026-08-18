@@ -299,6 +299,30 @@ def _build_cost_panel(state: AdvisoryState, settings) -> dict:
 # Main dashboard builder
 # ---------------------------------------------------------------------------
 
+def _build_execution_panel(state: AdvisoryState) -> dict:
+    """The order list and how to place it.
+
+    The five original panels describe the *decision*: weights, expert opinions,
+    cross-check, compliance, cost. None of them says how many shares to buy. The
+    execution plan is the part an investor acts on, so it gets a panel of its own
+    rather than being folded into the allocation chart.
+    """
+    plan = state.execution_plan or {}
+    return {
+        "positions": plan.get("positions", []),
+        "invested": plan.get("invested", 0.0),
+        "cash_residual": plan.get("cash_residual", 0.0),
+        "investable": plan.get("investable", 0.0),
+        "position_count": len(plan.get("positions", [])),
+        "guidance": plan.get("guidance", {}),
+        # Names that could not be executed, with the reason. Shown rather than
+        # hidden: "we dropped 茅台 because one lot costs more than its whole
+        # allocation" is information the investor is entitled to.
+        "dropped": plan.get("dropped", []),
+        "explanation": state.explanation,
+    }
+
+
 def build_dashboard(state: AdvisoryState, settings) -> dict:
     """Build the five-panel dashboard from a completed AdvisoryState.
 
@@ -311,11 +335,12 @@ def build_dashboard(state: AdvisoryState, settings) -> dict:
 
     Returns
     -------
-    dict with keys: allocation, experts, crosscheck, compliance, cost.
+    dict with keys: allocation, execution, experts, crosscheck, compliance, cost.
     """
     return {
         "status": state.status,
         "allocation": _build_allocation_panel(state),
+        "execution": _build_execution_panel(state),
         "experts": _build_experts_panel(state),
         "crosscheck": _build_crosscheck_panel(state),
         "compliance": _build_compliance_panel(state),

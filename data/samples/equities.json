@@ -9,9 +9,15 @@
     "metrics": {
       "pe": 28.5,
       "volatility": 0.22,
-      "market_cap_cny": 3500000000000
+      "market_cap_cny": 3500000000000,
+      "price": 1297.99,
+      "lot_size": 100
     },
-    "tags": ["白酒", "消费", "大盘"]
+    "tags": [
+      "白酒",
+      "消费",
+      "大盘"
+    ]
   },
   {
     "symbol": "000858",
@@ -23,9 +29,14 @@
     "metrics": {
       "pe": 22.3,
       "volatility": 0.24,
-      "market_cap_cny": 850000000000
+      "market_cap_cny": 850000000000,
+      "price": 72.56,
+      "lot_size": 100
     },
-    "tags": ["白酒", "消费"]
+    "tags": [
+      "白酒",
+      "消费"
+    ]
   },
   {
     "symbol": "601318",
@@ -37,9 +48,14 @@
     "metrics": {
       "pe": 9.8,
       "volatility": 0.19,
-      "market_cap_cny": 780000000000
+      "market_cap_cny": 780000000000,
+      "price": 51.32,
+      "lot_size": 100
     },
-    "tags": ["保险", "金融"]
+    "tags": [
+      "保险",
+      "金融"
+    ]
   },
   {
     "symbol": "300750",
@@ -51,9 +67,15 @@
     "metrics": {
       "pe": 35.6,
       "volatility": 0.38,
-      "market_cap_cny": 1200000000000
+      "market_cap_cny": 1200000000000,
+      "price": 396.26,
+      "lot_size": 100
     },
-    "tags": ["新能源", "科技", "大盘"]
+    "tags": [
+      "新能源",
+      "科技",
+      "大盘"
+    ]
   },
   {
     "symbol": "000001",
@@ -65,9 +87,14 @@
     "metrics": {
       "pe": 5.2,
       "volatility": 0.14,
-      "market_cap_cny": 210000000000
+      "market_cap_cny": 210000000000,
+      "price": 11.05,
+      "lot_size": 100
     },
-    "tags": ["银行", "金融"]
+    "tags": [
+      "银行",
+      "金融"
+    ]
   },
   {
     "symbol": "00700",
@@ -79,9 +106,15 @@
     "metrics": {
       "pe": 18.2,
       "volatility": 0.26,
-      "market_cap_hkd": 3200000000000
+      "market_cap_hkd": 3200000000000,
+      "price": 442.4,
+      "lot_size": 100
     },
-    "tags": ["科技", "互联网", "大盘"]
+    "tags": [
+      "科技",
+      "互联网",
+      "大盘"
+    ]
   },
   {
     "symbol": "09988",
@@ -93,9 +126,14 @@
     "metrics": {
       "pe": 14.5,
       "volatility": 0.32,
-      "market_cap_hkd": 1800000000000
+      "market_cap_hkd": 1800000000000,
+      "price": 126.7,
+      "lot_size": 100
     },
-    "tags": ["科技", "电商"]
+    "tags": [
+      "科技",
+      "电商"
+    ]
   },
   {
     "symbol": "03690",
@@ -107,9 +145,14 @@
     "metrics": {
       "pe": 25.1,
       "volatility": 0.35,
-      "market_cap_hkd": 720000000000
+      "market_cap_hkd": 720000000000,
+      "price": 85.55,
+      "lot_size": 100
     },
-    "tags": ["科技", "外卖"]
+    "tags": [
+      "科技",
+      "外卖"
+    ]
   },
   {
     "symbol": "01299",
@@ -121,9 +164,14 @@
     "metrics": {
       "pe": 16.8,
       "volatility": 0.18,
-      "market_cap_hkd": 580000000000
+      "market_cap_hkd": 580000000000,
+      "price": 72.55,
+      "lot_size": 200
     },
-    "tags": ["保险", "大盘"]
+    "tags": [
+      "保险",
+      "大盘"
+    ]
   },
   {
     "symbol": "00005",
@@ -135,9 +183,15 @@
     "metrics": {
       "pe": 8.4,
       "volatility": 0.16,
-      "market_cap_hkd": 1100000000000
+      "market_cap_hkd": 1100000000000,
+      "price": 162.1,
+      "lot_size": 400
     },
-    "tags": ["银行", "金融", "大盘"]
+    "tags": [
+      "银行",
+      "金融",
+      "大盘"
+    ]
   },
   {
     "symbol": "AAPL",
@@ -149,9 +203,15 @@
     "metrics": {
       "pe": 32.1,
       "volatility": 0.24,
-      "market_cap_usd": 3100000000000
+      "market_cap_usd": 3100000000000,
+      "price": 309.93,
+      "lot_size": 1
     },
-    "tags": ["科技", "消费电子", "大盘"]
+    "tags": [
+      "科技",
+      "消费电子",
+      "大盘"
+    ]
   },
   {
     "symbol": "MSFT",
@@ -163,9 +223,15 @@
     "metrics": {
       "pe": 35.8,
       "volatility": 0.22,
-      "market_cap_usd": 3400000000000
+      "market_cap_usd": 3400000000000,
+      "price": 481.38,
+      "lot_size": 1
     },
-    "tags": ["科技", "云计算", "大盘"]
+    "tags": [
+      "科技",
+      "云计算",
+      "大盘"
+    ]
   },
   {
     "symbol": "NVDA",
@@ -177,9 +243,14 @@
     "metrics": {
       "pe": 55.4,
       "volatility": 0.52,
-      "market_cap_usd": 3600000000000
+      "market_cap_usd": 3600000000000,
+      "price": 219.0,
+      "lot_size": 1
     },
-    "tags": ["科技", "AI芯片"]
+    "tags": [
+      "科技",
+      "AI芯片"
+    ]
   },
   {
     "symbol": "JPM",
@@ -191,9 +262,14 @@
     "metrics": {
       "pe": 12.5,
       "volatility": 0.18,
-      "market_cap_usd": 580000000000
+      "market_cap_usd": 580000000000,
+      "price": 361.63,
+      "lot_size": 1
     },
-    "tags": ["银行", "金融"]
+    "tags": [
+      "银行",
+      "金融"
+    ]
   },
   {
     "symbol": "BRK.B",
@@ -205,8 +281,14 @@
     "metrics": {
       "pe": 22.0,
       "volatility": 0.15,
-      "market_cap_usd": 950000000000
+      "market_cap_usd": 950000000000,
+      "price": 520.0,
+      "lot_size": 1,
+      "quote_basis": "synthetic"
     },
-    "tags": ["价值", "多元化"]
+    "tags": [
+      "价值",
+      "多元化"
+    ]
   }
 ]

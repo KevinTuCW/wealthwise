@@ -7,11 +7,8 @@ ceiling from goal_constraints.  Deterministic (no LLM).
 from __future__ import annotations
 
 import time
-from dataclasses import asdict
 
 from wealthwise.agents.state import AdvisoryState
-from wealthwise.portfolio.execution import build_execution_plan, realised_allocation
-from wealthwise.portfolio.guidance import build_guidance
 from wealthwise.portfolio.optimize import build_portfolio
 
 # Fixed-income / cash markets and asset classes to screen
@@ -58,23 +55,6 @@ def portfolio_node(state: AdvisoryState, deps) -> dict:
         method=gc.get("risk_budget_method", "risk_parity"),
     )
 
-    # Continuous weights are a target, not an order. Convert to whole lots and
-    # report what the investor will actually hold: compliance runs downstream of
-    # this, and approving weights nobody can execute is an audit gap.
-    plan_dict: dict = {}
-    investable = state.profile.investable if state.profile else 0.0
-    if investable > 0 and portfolio.weights:
-        plan = build_execution_plan(portfolio, all_candidates, investable)
-        if plan.positions:
-            portfolio = realised_allocation(portfolio, plan)
-            plan_dict = {
-                "positions": [asdict(pos) for pos in plan.positions],
-                "cash_residual": round(plan.cash_residual, 2),
-                "invested": round(plan.invested, 2),
-                "investable": investable,
-                "dropped": plan.dropped,
-                "guidance": build_guidance(state.profile, portfolio, plan),
-            }
 
     event = {
         "node": "portfolio",
@@ -96,7 +76,6 @@ def portfolio_node(state: AdvisoryState, deps) -> dict:
     return {
         "portfolio": portfolio,
         "fixedincome_candidates": fi_candidates,
-        "execution_plan": plan_dict,
         "trace_events": state.trace_events + [event],
         "notes": state.notes + [note],
     }
