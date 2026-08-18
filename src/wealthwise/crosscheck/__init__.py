@@ -1,4 +1,5 @@
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 
 from pydantic import BaseModel
 
@@ -29,11 +30,24 @@ def deliberate(clients: list[ModelClient], system: str, user: str,
     A lone model is capped at 0.5 confidence (it cannot be corroborated).
     With several models, confidence is the majority share; a tie yields no
     label; escalate fires whenever confidence falls below `escalate_below`.
+
+    Jurors are polled concurrently. They are independent by construction — that
+    independence is the whole premise of cross-validation — so querying them in
+    sequence made a deliberation cost the *sum* of the jurors' latencies when it
+    only ever needed to cost the slowest one. Results are still collected in
+    client order, so `verdicts`, `sources` and the reconciliation below are
+    unchanged; an exception from any juror still propagates, and does so from the
+    first juror in client order that raised, rather than whichever failed soonest.
     """
     if not clients:
         raise ValueError("deliberate() needs at least one model client")
 
-    verdicts = [c.judge(system, user, labels) for c in clients]
+    if len(clients) == 1:
+        verdicts = [clients[0].judge(system, user, labels)]
+    else:
+        with ThreadPoolExecutor(max_workers=len(clients)) as pool:
+            futures = [pool.submit(c.judge, system, user, labels) for c in clients]
+            verdicts = [f.result() for f in futures]   # in client order; re-raises
     sources = [c.name for c in clients]
     counts = Counter(v.label for v in verdicts)
     top_label, top_count = counts.most_common(1)[0]

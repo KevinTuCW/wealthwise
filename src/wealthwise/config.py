@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     # happened. An odd jury makes 3/3, 2/3 and no-majority three distinct
     # outcomes. Set to "" to fall back to the two-model configuration.
     third_model: str = "moonshotai/Kimi-K3"
+    # Jurors classify into a closed label set, where extended reasoning cost 30–60s
+    # per call without changing the verdict. Off by default; set false to restore
+    # it if a future juror is found to need it.
+    llm_disable_thinking: bool = True
+    llm_timeout: float = 60.0          # per-juror; deliberate() waits on all of them
 
     # --- embeddings ---
     embed_provider: str = "local"            # "local" (offline hashing) | "siliconflow"
@@ -65,6 +70,17 @@ class Settings(BaseSettings):
             and bool(self.langfuse_secret_key)
         )
 
+    # Vendor-specific switch that turns off extended reasoning. A juror picks one
+    # label from a closed set; measured on this workload, GLM-4.7 with thinking on
+    # took 30–60s and ~1,150 completion tokens to reach the same verdict it reaches
+    # in 2.4s and 42 tokens with it off. The two gateways spell the field
+    # differently, hence one per client rather than a shared constant.
+    def _no_thinking(self, vendor: str) -> dict | None:
+        if not self.llm_disable_thinking:
+            return None
+        return ({"thinking": {"type": "disabled"}} if vendor == "zai"
+                else {"enable_thinking": False})
+
     def primary_client_kwargs(self) -> dict:
         """Kwargs to build the primary (GLM) model client."""
         return {
@@ -72,6 +88,8 @@ class Settings(BaseSettings):
             "model": self.llm_model,
             "base_url": self.glm_base_url,
             "api_key": self.glm_api_key,
+            "extra_body": self._no_thinking("zai"),
+            "timeout": self.llm_timeout,
         }
 
     def crosscheck_client_kwargs(self) -> dict:
@@ -81,6 +99,8 @@ class Settings(BaseSettings):
             "model": self.crosscheck_model,
             "base_url": self.siliconflow_base_url,
             "api_key": self.siliconflow_api_key,
+            "extra_body": self._no_thinking("siliconflow"),
+            "timeout": self.llm_timeout,
         }
 
     def third_client_kwargs(self) -> dict:
@@ -90,6 +110,8 @@ class Settings(BaseSettings):
             "model": self.third_model,
             "base_url": self.siliconflow_base_url,
             "api_key": self.siliconflow_api_key,
+            "extra_body": self._no_thinking("siliconflow"),
+            "timeout": self.llm_timeout,
         }
 
 
