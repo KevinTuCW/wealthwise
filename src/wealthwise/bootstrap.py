@@ -155,7 +155,8 @@ def build_runtime_deps(settings: Settings | None = None) -> AdvisoryDeps:
         return build_sample_deps(s)
 
     from wealthwise.crosscheck.jury import build_jury_clients
-    from wealthwise.providers.akshare_provider import AkShareMarketProvider
+    from wealthwise.providers.tencent_provider import TencentMarketProvider
+    from wealthwise.providers.universe import Universe
 
     # Real embedder (SiliconFlow) — imported lazily so offline tests never touch it
     try:
@@ -168,7 +169,10 @@ def build_runtime_deps(settings: Settings | None = None) -> AdvisoryDeps:
     base_embedder_offline = LocalHashingEmbedder(dim=s.embed_dim)
 
     return AdvisoryDeps(
-        market=AkShareMarketProvider(),
+        # Quote-based provider over qt.gtimg.cn. Replaces the AkShare eastmoney
+        # screener, which resolves and handshakes but is reset mid-stream on
+        # roughly two calls in three — see providers/tencent_provider.py.
+        market=TencentMarketProvider(Universe.load()),
         macro=SampleMacroProvider(data_dir),  # AkShare macro not yet wired
         fx=SampleFXProvider(data_dir),         # AkShare FX not yet wired
         jury_clients=build_jury_clients(s),

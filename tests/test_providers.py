@@ -264,3 +264,137 @@ class TestProtocolConformance:
         assert isinstance(SampleMarketProvider(str(SAMPLES)), MarketProvider)
         assert isinstance(SampleMacroProvider(str(SAMPLES)), MacroProvider)
         assert isinstance(SampleFXProvider(str(SAMPLES)), FXProvider)
+
+
+# ---------------------------------------------------------------------------
+# TencentMarketProvider — quote-based A/HK/US provider
+# ---------------------------------------------------------------------------
+
+# Real response shapes, trimmed to the fields the mapper reads. Positions match
+# the live payloads: name=1, code=2, price=3, pe=39, mcap=45, pb=46.
+def _row(values: dict, width: int) -> str:
+    fields = [""] * width
+    for idx, val in values.items():
+        fields[idx] = val
+    return "~".join(fields)
+
+
+A_ROW = _row({1: "贵州茅台", 2: "600519", 3: "1297.99", 39: "19.93", 45: "16225.93",
+              46: "6.46"}, 88)
+HK_ROW = _row({1: "腾讯控股", 2: "00700", 3: "443.200", 39: "16.21", 45: "40344.99",
+               46: "TENCENT"}, 78)
+US_ROW = _row({1: "苹果", 2: "AAPL.OQ", 3: "305.59", 39: "35.04", 45: "44598.35",
+               46: "Apple Inc."}, 71)
+
+PAYLOAD = (
+    f'v_sh600519="{A_ROW}";\n'
+    f'v_hk00700="{HK_ROW}";\n'
+    f'v_usAAPL="{US_ROW}";\n'
+)
+
+UNIVERSE = {"A": ["600519"], "HK": ["00700"], "US": ["AAPL"]}
+
+
+def _provider(monkeypatch, payload=PAYLOAD):
+    from wealthwise.providers.tencent_provider import TencentMarketProvider
+    from wealthwise.providers.universe import Universe
+
+    p = TencentMarketProvider(Universe(UNIVERSE))
+    monkeypatch.setattr(p, "_get", lambda prefixed: payload)
+    return p
+
+
+class TestTencentMarketProvider:
+    def test_parses_all_three_market_layouts(self, monkeypatch):
+        from wealthwise.agents.state import AssetCandidate
+
+        results = _provider(monkeypatch).quotes(["600519", "00700", "AAPL"])
+        assert len(results) == 3
+        by_symbol = {r.symbol: r for r in results}
+        assert all(isinstance(r, AssetCandidate) for r in results)
+
+        a = by_symbol["600519"]
+        assert (a.market, a.currency, a.name) == ("A", "CNY", "贵州茅台")
+        assert a.metrics["pe"] == 19.93
+        assert a.metrics["pb"] == 6.46          # A-share layout only
+
+        hk = by_symbol["00700"]
+        assert (hk.market, hk.currency) == ("HK", "HKD")
+        assert hk.metrics["pe"] == 16.21
+        assert "pb" not in hk.metrics           # slot 46 is the English name here
+
+        us = by_symbol["AAPL"]                  # venue suffix ".OQ" stripped
+        assert (us.market, us.currency) == ("US", "USD")
+        assert us.metrics["pe"] == 35.04
+        assert "pb" not in us.metrics
+
+    def test_screen_filters_by_max_pe(self, monkeypatch):
+        p = _provider(monkeypatch)
+        assert [c.symbol for c in p.screen("A", {"max_pe": 25.0})] == ["600519"]
+        assert p.screen("A", {"max_pe": 10.0}) == []
+
+    def test_screen_drops_candidates_with_no_pe(self, monkeypatch):
+        """An unpriceable P/E must not pass a max_pe screen as if it were 0."""
+        blank = _row({1: "无PE", 2: "600519", 3: "10.0", 39: "-"}, 88)
+        p = _provider(monkeypatch, f'v_sh600519="{blank}";\n')
+        assert p.screen("A", {}) != []                 # unfiltered: still returned
+        assert p.screen("A", {"max_pe": 25.0}) == []   # filtered: dropped, not kept
+
+    def test_screen_rejects_non_equity_asset_class(self, monkeypatch):
+        assert _provider(monkeypatch).screen("A", {"asset_class": "bond"}) == []
+
+    def test_quotes_ignores_symbols_outside_universe(self, monkeypatch):
+        p = _provider(monkeypatch, "")
+        assert p.quotes(["NOT_IN_UNIVERSE"]) == []
+
+    def test_skips_truncated_rows(self, monkeypatch):
+        p = _provider(monkeypatch, 'v_sh600519="1~短~600519~10.0";\n')
+        assert p.screen("A", {}) == []
+
+    def test_symbol_prefixing_per_exchange(self):
+        from wealthwise.providers.tencent_provider import _prefix
+
+        assert _prefix("600519", "A") == "sh600519"    # Shanghai
+        assert _prefix("000001", "A") == "sz000001"    # Shenzhen
+        assert _prefix("830799", "A") == "bj830799"    # Beijing
+        assert _prefix("700", "HK") == "hk00700"       # zero-padded to 5
+        assert _prefix("aapl", "US") == "usAAPL"
+
+    def test_satisfies_market_provider_protocol(self):
+        from wealthwise.providers.base import MarketProvider
+        from wealthwise.providers.tencent_provider import TencentMarketProvider
+        from wealthwise.providers.universe import Universe
+
+        assert isinstance(TencentMarketProvider(Universe(UNIVERSE)), MarketProvider)
+
+    def test_requests_not_imported_at_module_level(self):
+        import sys
+        import wealthwise.providers.tencent_provider as mod  # noqa: F401
+
+        src = (
+            pathlib.Path(mod.__file__).read_text(encoding="utf-8").split("def _get")[0]
+        )
+        assert "import requests" not in src
+
+
+class TestUniverse:
+    def test_shipped_universe_covers_all_markets(self):
+        from wealthwise.providers.universe import Universe
+
+        u = Universe.load()
+        for market in ("A", "HK", "US"):
+            assert len(u.symbols(market)) > 0, f"{market} universe is empty"
+
+    def test_market_of_reverse_lookup(self):
+        from wealthwise.providers.universe import Universe
+
+        u = Universe(UNIVERSE)
+        assert u.market_of("600519") == "A"
+        assert u.market_of("aapl") == "US"      # case-insensitive
+        assert u.market_of("UNKNOWN") is None
+
+    def test_screen_never_returns_other_markets(self, monkeypatch):
+        """Cross-border exclusion must not depend on the endpoint's good behaviour."""
+        p = _provider(monkeypatch)   # stub echoes A + HK + US rows for every call
+        assert [c.symbol for c in p.screen("A", {})] == ["600519"]
+        assert [c.symbol for c in p.screen("HK", {})] == ["00700"]
