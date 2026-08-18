@@ -63,6 +63,13 @@ _MIN_FIELDS = _F_PE + 1
 
 _CURRENCY = {"A": "CNY", "HK": "HKD", "US": "USD"}
 
+# Suitability rating by asset class. Money-market and government/corporate bond
+# ETFs genuinely sit at the bottom of the R1–R5 scale, so these two are real
+# ratings rather than placeholders. Equity is still a placeholder: a spot quote
+# carries no rating, and deriving one needs a volatility history this provider
+# does not fetch.
+_R_LEVEL = {"cash": "R1", "bond": "R2", "equity": "R3"}
+
 
 def _prefix(symbol: str, market: str) -> str:
     """Map a bare symbol to the exchange-prefixed form qt.gtimg.cn expects."""
@@ -71,9 +78,13 @@ def _prefix(symbol: str, market: str) -> str:
         return f"hk{s.zfill(5)}"
     if market == "US":
         return f"us{s.upper()}"
-    # A-shares: 6/9 → Shanghai, 0/2/3 → Shenzhen, 4/8 → Beijing.
+    # Shanghai: 6xxxxx equities, 9xxxxx B-shares, and 5xxxxx funds/ETFs — that
+    # last range is the entire fixed-income sleeve, and defaulting it to Shenzhen
+    # returned no quote for every bond and money-market ETF while the Shenzhen
+    # 15xxxx ones worked, which is a failure shaped exactly like a bad symbol list.
+    # Shenzhen: 0/2/3 equities, 15xxxx/16xxxx funds. Beijing: 4/8.
     head = s[:1]
-    if head in ("6", "9"):
+    if head in ("5", "6", "9"):
         return f"sh{s}"
     if head in ("4", "8"):
         return f"bj{s}"
@@ -105,7 +116,8 @@ def _to_float(raw: str) -> float | None:
     return value
 
 
-def _map_quote_row(fields: list[str], market: str) -> dict | None:
+def _map_quote_row(fields: list[str], market: str,
+                   asset_class: str = "equity") -> dict | None:
     """Map one `~`-split quote row to AssetCandidate kwargs, or None if unusable."""
     if len(fields) < _MIN_FIELDS:
         return None
@@ -138,29 +150,30 @@ def _map_quote_row(fields: list[str], market: str) -> dict | None:
     return {
         "symbol": symbol,
         "market": market,
-        "asset_class": "equity",
+        "asset_class": asset_class,
         "name": (fields[_F_NAME] or "").strip(),
         "currency": _CURRENCY[market],
-        # Spot quotes carry no suitability rating. R3 is the same neutral
-        # placeholder the AkShare provider used; deriving a real r_level needs a
-        # volatility history fetch and is left to the risk-scoring task rather
-        # than guessed from a single day's price.
-        "r_level": "R3",
+        "r_level": _R_LEVEL.get(asset_class, "R3"),
         "metrics": metrics,
         "tags": [],
     }
 
 
-def _parse(payload: str) -> list[dict]:
-    """Parse a full quote response into AssetCandidate kwarg dicts."""
+def _parse(payload: str, class_of: dict[str, str] | None = None) -> list[dict]:
+    """Parse a full quote response into AssetCandidate kwarg dicts.
+
+    `class_of` maps prefixed symbol -> asset class; anything unlisted is equity.
+    """
     out: list[dict] = []
     for line in payload.splitlines():
         line = line.strip()
         if not line.startswith("v_") or "=" not in line:
             continue
         key, _, value = line.partition("=")
+        prefixed = key[2:]
         fields = value.strip().rstrip(";").strip('"').split("~")
-        mapped = _map_quote_row(fields, _market_of(key[2:]))
+        asset_class = (class_of or {}).get(prefixed, "equity")
+        mapped = _map_quote_row(fields, _market_of(prefixed), asset_class)
         if mapped is not None:
             out.append(mapped)
     return out
@@ -201,10 +214,12 @@ class TencentMarketProvider:
             chunks.append(response.text)
         return "\n".join(chunks)
 
-    def _fetch(self, prefixed: list[str]) -> list[AssetCandidate]:
+    def _fetch(self, prefixed: list[str],
+               class_of: dict[str, str] | None = None) -> list[AssetCandidate]:
         if not prefixed:
             return []
-        return [AssetCandidate(**row) for row in _parse(self._get(prefixed))]
+        return [AssetCandidate(**row)
+                for row in _parse(self._get(prefixed), class_of)]
 
     def quotes(self, symbols: list[str]) -> list[AssetCandidate]:
         """Fetch AssetCandidates for the given symbols (best-effort).
@@ -213,28 +228,45 @@ class TencentMarketProvider:
         bare "600519" or "AAPL" works the same way it did on the sample provider.
         """
         prefixed: list[str] = []
+        class_of: dict[str, str] = {}
         for symbol in symbols:
             market = self._universe.market_of(symbol)
-            if market is not None:
-                prefixed.append(_prefix(symbol, market))
-        return self._fetch(prefixed)
+            if market is None:
+                continue
+            key = _prefix(symbol, market)
+            prefixed.append(key)
+            class_of[key] = self._universe.asset_class_of(symbol) or "equity"
+        return self._fetch(prefixed, class_of)
 
     def screen(self, market: str, filters: dict) -> list[AssetCandidate]:
         """Return universe candidates in `market` matching the filter dict.
 
-        Supported filters: asset_class (exact match), max_pe.
-        """
-        if filters.get("asset_class") and filters["asset_class"] != "equity":
-            return []   # this provider only serves equities
+        Supported filters: asset_class (equity / bond / cash), max_pe.
 
-        prefixed = [_prefix(s, market) for s in self._universe.symbols(market)]
+        Bond and cash are served from the same endpoint as equity: the fixed-income
+        sleeve is exchange-traded money-market and government/corporate bond ETFs,
+        which quote exactly like a stock. Returning nothing for them, as an earlier
+        revision did, left every portfolio 100% equity — and no liquidity floor can
+        be met out of an all-equity candidate set, so every advisory downgraded.
+        """
+        asset_class = filters.get("asset_class", "equity")
+
+        wanted = self._universe.symbols(market, asset_class)
+        expected = {s.casefold() for s in wanted}
+        prefixed = [_prefix(s, market) for s in wanted]
+        class_of = dict.fromkeys(prefixed, asset_class)
         out: list[AssetCandidate] = []
-        for candidate in self._fetch(prefixed):
-            # Only requested symbols come back in practice, so this looks
-            # redundant — but "A-shares only" is a compliance constraint when
-            # the investor declined cross-border exposure, and that invariant
-            # should not rest on the endpoint echoing exactly what it was asked.
+        for candidate in self._fetch(prefixed, class_of):
+            # Only requested symbols come back in practice, so restricting the
+            # response to what was asked for looks redundant. It guards two
+            # invariants that should not rest on the endpoint behaving: "A-shares
+            # only" is a compliance constraint when the investor declined
+            # cross-border exposure, and the asset-class tag feeds the liquidity
+            # floor — an equity that arrived tagged as cash would make a
+            # liquidity shortfall read as satisfied.
             if candidate.market != market:
+                continue
+            if candidate.symbol.casefold() not in expected:
                 continue
             if "max_pe" in filters:
                 pe = candidate.metrics.get("pe")

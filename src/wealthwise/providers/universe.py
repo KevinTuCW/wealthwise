@@ -6,6 +6,11 @@ whole point of moving off the eastmoney screener was to stop a flaky network
 fetch from being able to fail an advisory run, and re-introducing one here to
 fetch the constituent list would put the same failure back a layer down.
 
+Shape: ``{asset_class: {market: [symbol, ...]}}``. The asset-class dimension is
+not decoration — `portfolio_node` screens for bond and cash separately from
+equity, and a universe that only knows about equities leaves the portfolio 100%
+stock, which no liquidity floor can ever satisfy.
+
 Refresh the file with `scripts/refresh_universe.py` (index constituents change
 each quarter); the pipeline itself never fetches it.
 """
@@ -14,7 +19,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-_MARKETS = ("A", "HK", "US")
+MARKETS = ("A", "HK", "US")
+ASSET_CLASSES = ("equity", "bond", "cash")
 
 DEFAULT_UNIVERSE_PATH = (
     Path(__file__).resolve().parent.parent.parent.parent / "data" / "universe.json"
@@ -22,30 +28,39 @@ DEFAULT_UNIVERSE_PATH = (
 
 
 class Universe:
-    """Per-market symbol lists, with reverse lookup from symbol to market."""
+    """Per-asset-class, per-market symbol lists, with reverse lookup by symbol."""
 
-    def __init__(self, by_market: dict[str, list[str]]) -> None:
-        self._by_market = {m: list(by_market.get(m, [])) for m in _MARKETS}
+    def __init__(self, by_class: dict[str, dict[str, list[str]]]) -> None:
+        self._by_class: dict[str, dict[str, list[str]]] = {
+            cls: {m: list(by_class.get(cls, {}).get(m, [])) for m in MARKETS}
+            for cls in ASSET_CLASSES
+        }
         # Reverse index for quotes(): callers pass bare symbols with no market.
-        self._market_of: dict[str, str] = {}
-        for market in _MARKETS:
-            for symbol in self._by_market[market]:
-                self._market_of.setdefault(symbol.casefold(), market)
+        self._lookup: dict[str, tuple[str, str]] = {}
+        for cls in ASSET_CLASSES:
+            for market in MARKETS:
+                for symbol in self._by_class[cls][market]:
+                    self._lookup.setdefault(symbol.casefold(), (market, cls))
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> Universe:
-        """Load the universe from JSON: {"A": [...], "HK": [...], "US": [...]}."""
+        """Load the universe from JSON: {asset_class: {market: [symbols]}}."""
         target = Path(path) if path is not None else DEFAULT_UNIVERSE_PATH
         with open(target, encoding="utf-8") as fh:
-            raw = json.load(fh)
-        return cls({m: raw.get(m, []) for m in _MARKETS})
+            return cls(json.load(fh))
 
-    def symbols(self, market: str) -> list[str]:
-        return list(self._by_market.get(market, []))
+    def symbols(self, market: str, asset_class: str = "equity") -> list[str]:
+        return list(self._by_class.get(asset_class, {}).get(market, []))
 
     def market_of(self, symbol: str) -> str | None:
         """Return the market a bare symbol belongs to, or None if unknown."""
-        return self._market_of.get(symbol.strip().casefold())
+        found = self._lookup.get(symbol.strip().casefold())
+        return found[0] if found else None
+
+    def asset_class_of(self, symbol: str) -> str | None:
+        """Return the asset class a bare symbol belongs to, or None if unknown."""
+        found = self._lookup.get(symbol.strip().casefold())
+        return found[1] if found else None
 
     def __len__(self) -> int:
-        return sum(len(v) for v in self._by_market.values())
+        return sum(len(v) for cls in self._by_class.values() for v in cls.values())

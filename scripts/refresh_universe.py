@@ -42,6 +42,17 @@ HK_SYMBOLS = [
     "09618", "09999", "01024", "02269", "06862", "01876", "00291", "00322",
 ]
 
+# Exchange-traded money-market funds — the cash sleeve. These quote on the same
+# endpoint as equities, so the whole universe stays on one reliable request.
+CASH_SYMBOLS = ["511990", "511880", "511660", "511690", "511900", "159001"]
+
+# Government / local-government / corporate bond ETFs — the fixed-income sleeve,
+# spread across the curve rather than all sitting in ten-year treasuries.
+BOND_SYMBOLS = [
+    "511010", "511260", "511020", "511090", "511030", "511220",
+    "159972", "159926",
+]
+
 # US large caps: the mega-cap tech complex plus enough non-tech (healthcare,
 # financials, staples, energy) that the screener is not a one-sector bet.
 US_SYMBOLS = [
@@ -78,15 +89,19 @@ def verify(symbols: list[str], market: str) -> tuple[list[str], list[str]]:
 
 
 def main() -> int:
-    universe: dict[str, list[str]] = {}
-    for market, symbols in (
-        ("A", fetch_csi300()),
-        ("HK", HK_SYMBOLS),
-        ("US", US_SYMBOLS),
+    universe: dict[str, dict[str, list[str]]] = {}
+    total = 0
+    for asset_class, market, symbols in (
+        ("equity", "A", fetch_csi300()),
+        ("equity", "HK", HK_SYMBOLS),
+        ("equity", "US", US_SYMBOLS),
+        ("bond", "A", BOND_SYMBOLS),
+        ("cash", "A", CASH_SYMBOLS),
     ):
         ok, missing = verify(symbols, market)
-        universe[market] = ok
-        print(f"{market:3} kept {len(ok):4} / {len(symbols):4}")
+        universe.setdefault(asset_class, {})[market] = ok
+        total += len(ok)
+        print(f"{asset_class:6} {market:3} kept {len(ok):4} / {len(symbols):4}")
         if missing:
             print(f"    dropped (no quote): {', '.join(missing)}")
 
@@ -94,7 +109,7 @@ def main() -> int:
     with open(DEFAULT_UNIVERSE_PATH, "w", encoding="utf-8") as fh:
         json.dump(universe, fh, ensure_ascii=False, indent=2, sort_keys=True)
         fh.write("\n")
-    print(f"\nwrote {DEFAULT_UNIVERSE_PATH} ({sum(len(v) for v in universe.values())} symbols)")
+    print(f"\nwrote {DEFAULT_UNIVERSE_PATH} ({total} symbols)")
     return 0
 
 

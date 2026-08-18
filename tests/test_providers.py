@@ -292,7 +292,11 @@ PAYLOAD = (
     f'v_usAAPL="{US_ROW}";\n'
 )
 
-UNIVERSE = {"A": ["600519"], "HK": ["00700"], "US": ["AAPL"]}
+UNIVERSE = {
+    "equity": {"A": ["600519"], "HK": ["00700"], "US": ["AAPL"]},
+    "bond": {"A": ["511010"]},
+    "cash": {"A": ["511990"]},
+}
 
 
 def _provider(monkeypatch, payload=PAYLOAD):
@@ -340,8 +344,21 @@ class TestTencentMarketProvider:
         assert p.screen("A", {}) != []                 # unfiltered: still returned
         assert p.screen("A", {"max_pe": 25.0}) == []   # filtered: dropped, not kept
 
-    def test_screen_rejects_non_equity_asset_class(self, monkeypatch):
-        assert _provider(monkeypatch).screen("A", {"asset_class": "bond"}) == []
+    def test_serves_the_fixed_income_sleeve(self, monkeypatch):
+        """An all-equity candidate set can never satisfy a liquidity floor."""
+        bond = _row({1: "国债ETF", 2: "511010", 3: "141.28"}, 88)
+        cash = _row({1: "华宝添益", 2: "511990", 3: "100.00"}, 88)
+        p = _provider(monkeypatch, f'v_sh511010="{bond}";\nv_sh511990="{cash}";\n')
+
+        bonds = p.screen("A", {"asset_class": "bond"})
+        assert [c.symbol for c in bonds] == ["511010"]
+        assert bonds[0].asset_class == "bond"
+        assert bonds[0].r_level == "R2"       # bond ETFs are genuinely low-risk
+
+        cashes = p.screen("A", {"asset_class": "cash"})
+        assert [c.symbol for c in cashes] == ["511990"]
+        assert cashes[0].asset_class == "cash"
+        assert cashes[0].r_level == "R1"
 
     def test_quotes_ignores_symbols_outside_universe(self, monkeypatch):
         p = _provider(monkeypatch, "")
@@ -354,8 +371,10 @@ class TestTencentMarketProvider:
     def test_symbol_prefixing_per_exchange(self):
         from wealthwise.providers.tencent_provider import _prefix
 
-        assert _prefix("600519", "A") == "sh600519"    # Shanghai
-        assert _prefix("000001", "A") == "sz000001"    # Shenzhen
+        assert _prefix("600519", "A") == "sh600519"    # Shanghai equity
+        assert _prefix("511990", "A") == "sh511990"    # Shanghai fund/ETF
+        assert _prefix("159001", "A") == "sz159001"    # Shenzhen fund/ETF
+        assert _prefix("000001", "A") == "sz000001"    # Shenzhen equity
         assert _prefix("830799", "A") == "bj830799"    # Beijing
         assert _prefix("700", "HK") == "hk00700"       # zero-padded to 5
         assert _prefix("aapl", "US") == "usAAPL"
@@ -383,7 +402,15 @@ class TestUniverse:
 
         u = Universe.load()
         for market in ("A", "HK", "US"):
-            assert len(u.symbols(market)) > 0, f"{market} universe is empty"
+            assert len(u.symbols(market)) > 0, f"{market} equity universe is empty"
+
+    def test_shipped_universe_has_a_fixed_income_sleeve(self):
+        """Without bond+cash the portfolio is 100% equity and always downgrades."""
+        from wealthwise.providers.universe import Universe
+
+        u = Universe.load()
+        for asset_class in ("bond", "cash"):
+            assert len(u.symbols("A", asset_class)) > 0, f"no {asset_class} symbols"
 
     def test_market_of_reverse_lookup(self):
         from wealthwise.providers.universe import Universe
@@ -392,9 +419,23 @@ class TestUniverse:
         assert u.market_of("600519") == "A"
         assert u.market_of("aapl") == "US"      # case-insensitive
         assert u.market_of("UNKNOWN") is None
+        assert u.asset_class_of("600519") == "equity"
+        assert u.asset_class_of("511990") == "cash"
+        assert u.asset_class_of("UNKNOWN") is None
 
     def test_screen_never_returns_other_markets(self, monkeypatch):
         """Cross-border exclusion must not depend on the endpoint's good behaviour."""
         p = _provider(monkeypatch)   # stub echoes A + HK + US rows for every call
         assert [c.symbol for c in p.screen("A", {})] == ["600519"]
         assert [c.symbol for c in p.screen("HK", {})] == ["00700"]
+
+    def test_screen_never_returns_unrequested_symbols(self, monkeypatch):
+        """The asset-class tag feeds the liquidity floor; it must not be guessed."""
+        equity = _row({1: "贵州茅台", 2: "600519", 3: "1297.99", 39: "19.93"}, 88)
+        cash = _row({1: "华宝添益", 2: "511990", 3: "100.00"}, 88)
+        # Stub echoes an equity row on a cash screen — it must not be tagged cash.
+        p = _provider(monkeypatch, f'v_sh511990="{cash}";\nv_sh600519="{equity}";\n')
+
+        got = p.screen("A", {"asset_class": "cash"})
+        assert [c.symbol for c in got] == ["511990"]
+        assert all(c.asset_class == "cash" for c in got)
