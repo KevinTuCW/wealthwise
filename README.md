@@ -344,17 +344,17 @@ wealthwise/
 
 已交付：
 
-- [x] Supervisor + 5 专家 LangGraph 流水线（目标 / 宏观 / 权益 / 风险组合 / 合规）
-- [x] 多源共识（支柱一）+ 多模型陪审（支柱二）
-- [x] 三层护栏（输入 / 过程 / 输出）+ 预算护栏
-- [x] 中国投资者适当性（C1–C5）+ 跨境汇率规则 + 误导用语检测
-- [x] A/港/美股覆盖（样例 Provider + AkShare 真实 Provider 骨架）
-- [x] RAG 宏观上下文 + 合规/研报语料（内存、本地哈希嵌入）
-- [x] Langfuse 全链路可观测（可选、离线安全）
-- [x] SSE 工作台 + 运行审计存储（memory / sqlite）
-- [x] 多套件评测门禁（64 例，含端到端 status_routing 与 allocation_sanity 硬门）
-- [x] Docker + docker-compose + CI（GitHub Actions）
-- [x] 持久化（RunStore：memory + sqlite，Postgres 预留）
+- ✅ Supervisor + 5 专家 LangGraph 流水线（目标 / 宏观 / 权益 / 风险组合 / 合规）
+- ✅ 多源共识（支柱一）+ 多模型陪审（支柱二）
+- ✅ 三层护栏（输入 / 过程 / 输出）+ 预算护栏
+- ✅ 中国投资者适当性（C1–C5）+ 跨境汇率规则 + 误导用语检测
+- ✅ A/港/美股覆盖（样例 Provider + AkShare 真实 Provider 骨架）
+- ✅ RAG 宏观上下文 + 合规/研报语料（内存、本地哈希嵌入）
+- ✅ Langfuse 全链路可观测（可选、离线安全）
+- ✅ SSE 工作台 + 运行审计存储（memory / sqlite）
+- ✅ 多套件评测门禁（64 例，含端到端 status_routing 与 allocation_sanity 硬门）
+- ✅ Docker + docker-compose + CI（GitHub Actions）
+- ✅ 持久化（RunStore：memory + sqlite，Postgres 预留）
 
 已知留白与后续工作：
 
