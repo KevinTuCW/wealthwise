@@ -12,7 +12,7 @@ from __future__ import annotations
 import time
 
 from wealthwise.agents.state import AdvisoryState
-from wealthwise.crosscheck import deliberate
+from wealthwise.crosscheck import deliberate, jury_votes
 from wealthwise.security.sanitize import neutralize_untrusted
 
 # ---------------------------------------------------------------------------
@@ -110,6 +110,8 @@ def macro_node(state: AdvisoryState, deps) -> dict:
         "data_confidence": data_confidence,
         "contested_signals": contested,
         "tokens": tokens_added,
+        "votes": jury_votes(jury_result, "macro_tilt"),
+        "disagreement": jury_result.disagreement,
     }
     note = (
         f"macro_node: tilt={tilt} confidence={jury_result.confidence:.2f} "

@@ -22,6 +22,23 @@ class JuryResult(BaseModel):
     tokens: int = 0        # total tokens across the jury for this judgment
 
 
+def jury_votes(result: "JuryResult", stage: str) -> list[dict]:
+    """Per-juror labels, in the shape the trace and the workbench read.
+
+    `deliberate()` already carries every juror's verdict, but until this landed
+    nothing put them into `trace_events`, so the dashboard reconstructed the
+    jury from node names — found none — and reported "no jury was convened" on
+    runs where the jury had in fact decided the macro tilt. A pillar that cannot
+    be seen in the trace cannot be audited, which for a cross-validation layer
+    is most of the point of having one.
+    """
+    return [
+        {"stage": stage, "source": source, "label": verdict.label,
+         "rationale": (verdict.rationale or "")[:160]}
+        for source, verdict in zip(result.sources, result.verdicts)
+    ]
+
+
 @traced("wealthwise.crosscheck.deliberate")
 def deliberate(clients: list[ModelClient], system: str, user: str,
                labels: list[str], *, escalate_below: float = 0.66) -> JuryResult:

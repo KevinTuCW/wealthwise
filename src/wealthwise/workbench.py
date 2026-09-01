@@ -200,9 +200,6 @@ def _build_ranking(state: AdvisoryState) -> dict:
 
 def _build_crosscheck_panel(state: AdvisoryState) -> dict:
     """Panel 3: multi-source consensus + multi-model jury agreement signals."""
-    # Extract crosscheck / jury signals from trace_events
-    jury_events = [e for e in state.trace_events if "jury" in e.get("node", "").lower()
-                   or "crosscheck" in e.get("node", "").lower()]
     compliance_events = [e for e in state.trace_events if "compliance" in e.get("node", "")]
 
     # Macro tilt consensus (from macro_view)
@@ -210,19 +207,28 @@ def _build_crosscheck_panel(state: AdvisoryState) -> dict:
     macro_tilt = macro.get("tilt", macro.get("equity_tilt", "neutral"))
     macro_confidence = macro.get("confidence")
 
-    # Jury/model agreement: look for jury sub-events
+    # Every juror's ballot, across every stage that convened one. This used to
+    # scan for events whose *node name* contained "jury" — no node is called
+    # that, so it always found nothing and the panel reported "no jury was
+    # convened" on runs where the jury had decided the macro tilt. The nodes now
+    # record their ballots; read them.
     jury_votes: list[dict] = []
     for ev in state.trace_events:
-        if "votes" in ev:
-            jury_votes = ev["votes"]
-            break
-        if "jury" in ev.get("node", "").lower() and "label" in ev:
-            jury_votes.append({"node": ev["node"], "label": ev.get("label", "")})
+        jury_votes.extend(ev.get("votes") or [])
 
-    # Agreement signal
-    labels = [v.get("label", "") for v in jury_votes if v.get("label")]
-    unique_labels = set(labels)
-    agreement = "unanimous" if len(unique_labels) <= 1 and labels else "split" if len(unique_labels) > 1 else "n/a"
+    # Agreement is per *judgment*, not across the pooled ballots: a unanimous
+    # macro vote and a unanimous compliance vote with different labels are two
+    # agreements, and pooling them would report a split that nobody had.
+    per_stage: dict[str, set[str]] = {}
+    for vote in jury_votes:
+        if vote.get("label"):
+            per_stage.setdefault(vote.get("stage", ""), set()).add(vote["label"])
+    if not per_stage:
+        agreement = "n/a"
+    elif any(len(labels) > 1 for labels in per_stage.values()):
+        agreement = "split"
+    else:
+        agreement = "unanimous"
 
     # Escalation signals
     escalation_signals: list[str] = []
@@ -242,7 +248,10 @@ def _build_crosscheck_panel(state: AdvisoryState) -> dict:
         "jury_votes": jury_votes,
         "agreement": agreement,
         "escalation_signals": escalation_signals,
-        "jury_event_count": len(jury_events),
+        # Deliberations, not ballots: three jurors on one question is one
+        # deliberation, and it is the number the budget guard counts.
+        "jury_deliberations": len(per_stage),
+        "jury_event_count": len(jury_votes),
         "compliance_event_count": len(compliance_events),
         # --- pillar one: multi-source consensus ---
         # Kept separate from `macro_confidence`, which is the jury's. The two

@@ -23,7 +23,7 @@ import time
 from wealthwise.agents.state import AdvisoryState, ComplianceVerdict
 from wealthwise.compliance.language import detect_misleading, neutralize
 from wealthwise.compliance.suitability import check_suitability
-from wealthwise.crosscheck import deliberate
+from wealthwise.crosscheck import deliberate, jury_votes
 from wealthwise.security.sanitize import neutralize_untrusted
 
 # ---------------------------------------------------------------------------
@@ -124,6 +124,7 @@ def compliance_node(state: AdvisoryState, deps) -> dict:
     # ------------------------------------------------------------------
     jury_tokens = 0
     jury_decision = base_verdict.decision  # default: agree with suitability
+    jury_result = None                     # stays None when the jury does not run
 
     review_pass = _sample_pass_review(profile, getattr(deps, "jury_review_pass_rate", 1.0))
     if (base_verdict.decision in {"DOWNGRADE", "REJECT"}
@@ -204,6 +205,10 @@ def compliance_node(state: AdvisoryState, deps) -> dict:
         "n_violations": len(violations),
         "n_disclosures": len(disclosures),
         "tokens": tokens_added,
+        # Empty when the jury did not run — the compliance jury only fires on a
+        # non-PASS verdict or high FX, and "did not run" has to be
+        # distinguishable from "ran and agreed".
+        "votes": jury_votes(jury_result, "compliance") if jury_result else [],
     }
     note = (
         f"compliance_node: suitability={base_verdict.decision} "
