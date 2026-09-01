@@ -366,6 +366,32 @@
     }
 
     // ---- Experts panel ----
+    // The composite alone is not reviewable — "0.83" says nothing about whether
+    // the name was picked for being cheap or for being calm. The per-factor
+    // z-scores are what make the ranking arguable.
+    const FACTOR_LABELS = {
+      value: "价值", momentum: "动量", low_vol: "低波",
+      size: "规模", liquidity: "流动性",
+    };
+
+    function factorRows(ranking) {
+      const top = ranking?.top || [];
+      if (!top.length) return "";
+      const rows = top.map((t) => {
+        const z = Object.entries(t.z || {})
+          .map(([k, v]) => `${FACTOR_LABELS[k] || k} ${v > 0 ? "+" : ""}${v.toFixed(2)}`)
+          .join(" · ");
+        return `<div class="kv-row"><span class="kv-k mono">${esc(t.symbol)}</span>
+          <span>${esc(t.score.toFixed(3))}
+          <div class="mono" style="opacity:.6;font-size:11px">${esc(z)}</div></span></div>`;
+      }).join("");
+      const thin = ranking.thin_evidence || [];
+      return rows + (thin.length
+        ? `<div class="mono" style="opacity:.6;font-size:11px;color:var(--warn)">
+           ${thin.length} 个标的因子覆盖偏薄：${esc(thin.join(", "))}</div>`
+        : "");
+    }
+
     function renderExperts(experts) {
       const kv = (k, v) => `<div class="kv-row"><span class="kv-k">${esc(k)}</span><span>${esc(v)}</span></div>`;
       const macro = experts.macro || {};
@@ -383,6 +409,8 @@
           <div class="expert-card"><h3>权益筛选</h3>
             ${kv("候选数", eq.candidate_count ?? "—")}
             ${kv("固收候选", fi.candidate_count ?? "—")}
+            ${kv("排序方式", eq.ranking?.method === "factor" ? "多因子打分" : "规模优先")}
+            ${factorRows(eq.ranking)}
           </div>
           <div class="expert-card"><h3>组合构建</h3>
             ${kv("组合风险", pc.portfolio_r_level || "—")}
@@ -403,15 +431,46 @@
         : cc.agreement === "split" ? "var(--warn)" : "var(--muted)";
       const escalations = (cc.escalation_signals || []).map(
         (s) => `<span class="pill pill-reject">${esc(s)}</span>`).join(" ") || "<em>无</em>";
+
+      // Pillar one: one row per reconciled signal. A single source is shown as
+      // capped at 50% rather than hidden — "we only have one publisher for this"
+      // is the finding, not a gap in the display.
+      const signals = cc.consensus_signals || [];
+      const signalRows = signals.map((s) => {
+        const color = s.disagreement ? "var(--warn)" : "var(--muted)";
+        const readings = Object.entries(s.readings || {})
+          .map(([src, v]) => `${esc(src)}=${esc(v)}`).join(" · ");
+        return `<tr>
+          <td class="mono">${esc(s.signal)}</td>
+          <td class="num">${esc(s.value)}</td>
+          <td class="num" style="color:${color}">${s.confidence != null ? pct(s.confidence) : "—"}</td>
+          <td style="color:${color}">${esc(String(s.sources?.length ?? 0))} 源${s.disagreement ? " ⚠" : ""}
+            <div class="mono" style="opacity:.6;font-size:11px">${readings}</div></td>
+        </tr>`;
+      }).join("");
+
+      const mq = cc.market_data_quality || {};
+      const disputed = (mq.disputed || []);
+
       byId("crosscheck-body").innerHTML = `
-        <table>
+        <table style="margin-bottom:12px">
           <tr><th>指标</th><th>值</th></tr>
           <tr><td>宏观倾向</td><td>${esc(cc.macro_tilt || "—")}</td></tr>
-          <tr><td>宏观置信度</td><td>${cc.macro_confidence != null ? pct(cc.macro_confidence) : "—"}</td></tr>
+          <tr><td>陪审置信度</td><td>${cc.macro_confidence != null ? pct(cc.macro_confidence) : "—"}</td></tr>
+          <tr><td>数据置信度</td><td>${cc.data_confidence != null ? pct(cc.data_confidence) : "—"}</td></tr>
           <tr><td>评判一致性</td><td style="color:${agreementColor};font-weight:700">${esc(cc.agreement || "—")}</td></tr>
-          <tr><td>评判事件数</td><td>${esc(cc.jury_event_count)}</td></tr>
+          <tr><td>数据源</td><td class="mono">${esc((cc.data_sources || []).join(" · ") || "—")}</td></tr>
           <tr><td>升级信号</td><td>${escalations}</td></tr>
-        </table>`;
+        </table>
+        ${signals.length ? `<h3 style="font-size:12px;opacity:.7;margin:0 0 6px">支柱一 · 多源共识</h3>
+        <table style="margin-bottom:12px">
+          <thead><tr><th>信号</th><th class="num">共识值</th><th class="num">置信</th><th>来源</th></tr></thead>
+          <tbody>${signalRows}</tbody>
+        </table>` : ""}
+        <div class="kv-row"><span class="kv-k">行情双源核对</span>
+          <span>${esc(mq.cross_checked ?? 0)} / ${esc(mq.candidates ?? 0)} 个标的
+          ${disputed.length ? `<span style="color:var(--warn)">· ${disputed.length} 个报价分歧已剔除</span>` : ""}</span></div>
+        ${disputed.length ? `<div class="mono" style="opacity:.6;font-size:11px">${esc(disputed.join(", "))}</div>` : ""}`;
     }
 
     // ---- Compliance panel ----

@@ -103,8 +103,20 @@ DONE   (full trace returned; Langfuse synced if enabled)
 
 **Dual cross-check:**
 
-- *Multi-source consensus* (pillar 1) — macro/quant signals from multiple AkShare tables are
-  resolved to a median with confidence capped at 0.5 for single-source readings.
+- *Multi-source consensus* (pillar 1) — **both quotes and macro run on genuinely
+  independent sources**, reconciled to a median with disagreement recorded by name;
+  a single-source reading is capped at 0.5 confidence because it cannot corroborate itself.
+  - *Quotes*: Tencent `qt.gtimg.cn` (primary — owns screening and filter semantics)
+    cross-checked against Sina `hq.sinajs.cn`, per symbol and per metric.
+    Price tolerance 2%, valuation tolerance 15%: two feeds quoting the same exchange
+    should agree to within a tick, while P/E windows legitimately differ. Names whose
+    price is disputed are kept out of the order list but always tagged into the trace.
+  - *Macro*: AkShare `macro_china_lpr` (one publisher → 0.5) plus two independent CPI
+    publishers (`macro_china_cpi_yearly`, `macro_china_cpi`) genuinely reconciled through
+    `SourceRegistry`. No second rate source was invented — Shibor and LPR measure
+    different things, and medianing them yields a number nobody publishes.
+  - The offline stack runs the same layer (one source, 0.5), so tests and evals exercise
+    the production path rather than a shorter one.
 - *Multi-model jury* (pillar 2) — compliance and macro verdicts go to a two-model
   panel (GLM + DeepSeek-V3, different labs for independence); majority label wins;
   low-confidence cases are flagged for human review.
@@ -144,7 +156,7 @@ python3 -m venv .venv
 .venv/bin/pip install -e '.[dev,llm]'
 
 # 3. Run tests (offline, hermetic)
-make test           # → 370 passed
+make test           # → 503 passed
 
 # 4. Run eval gate (offline, hard gates)
 make eval           # → 64/64, suitability leaks 0, injection block 100%
@@ -317,7 +329,8 @@ See the Chinese README ([README.md](README.md)) for an annotated file tree. Key 
 Delivered:
 
 - [x] Supervisor + 5-expert LangGraph pipeline (goal / macro / equity / portfolio / compliance)
-- [x] Multi-source consensus (pillar 1) + multi-model jury (pillar 2, jury only strictens)
+- [x] Multi-source consensus (pillar 1: Tencent+Sina quotes / LPR + two CPI publishers) + multi-model jury (pillar 2, jury only strictens)
+- [x] Five-factor cross-sectional scoring (value / momentum / low-vol / size / liquidity), `.env`-gated, off by default
 - [x] Three-layer guardrails (input / process / output) + budget guardrail
 - [x] China investor-suitability (C1–C5) + cross-border FX rules + misleading-language detection
 - [x] A/HK/US market coverage (sample provider + AkShare real-provider skeleton)

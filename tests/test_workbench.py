@@ -591,3 +591,106 @@ class TestExecutionPanel:
             for c in market.screen("A", {"asset_class": asset_class}):
                 assert c.metrics.get("price"), f"{c.symbol} has no price"
                 assert c.metrics.get("lot_size"), f"{c.symbol} has no lot size"
+
+
+class TestCrosscheckPanelSurfacesConsensus:
+    """Pillar one had no representation in the UI — including when it disagreed."""
+
+    def _state(self, consensus, contested=(), equity=(), equity_event=None):
+        events = [{"node": "macro", "ts": 1.0}]
+        if equity_event is not None:
+            events.append({"node": "equity", "ts": 2.0, **equity_event})
+        return AdvisoryState(
+            profile=_c3_profile(),
+            macro_view={
+                "tilt": "neutral",
+                "confidence": 1.0,
+                "data_confidence": min(
+                    (c["confidence"] for c in consensus.values()), default=None),
+                "signal_consensus": consensus,
+                "contested_signals": list(contested),
+                "sources": ["akshare-cpi-yearly", "akshare-cpi-nbs"],
+            },
+            equity_candidates=list(equity),
+            trace_events=events,
+            status="done",
+        )
+
+    def test_每个信号一行含来源与置信(self):
+        state = self._state({
+            "cpi": {"value": 0.021, "confidence": 0.95, "disagreement": False,
+                    "sources": ["a", "b"], "readings": {"a": 0.021, "b": 0.0215}},
+        })
+        cc = build_dashboard(state, get_settings())["crosscheck"]
+
+        assert cc["consensus_signals"][0]["signal"] == "cpi"
+        assert cc["consensus_signals"][0]["sources"] == ["a", "b"]
+        assert cc["data_sources"] == ["akshare-cpi-yearly", "akshare-cpi-nbs"]
+
+    def test_分歧信号排在最前(self):
+        state = self._state({
+            "cpi": {"value": 0.021, "confidence": 0.95, "disagreement": False,
+                    "sources": ["a", "b"], "readings": {}},
+            "interest_rate": {"value": 0.031, "confidence": 0.2, "disagreement": True,
+                              "sources": ["a", "b"], "readings": {}},
+        }, contested=["interest_rate"])
+        cc = build_dashboard(state, get_settings())["crosscheck"]
+
+        assert cc["consensus_signals"][0]["signal"] == "interest_rate"
+        assert "data:contested(interest_rate)" in cc["escalation_signals"]
+
+    def test_数据置信度与陪审置信度分开呈现(self):
+        state = self._state({
+            "cpi": {"value": 0.021, "confidence": 0.5, "disagreement": False,
+                    "sources": ["only"], "readings": {}},
+        })
+        cc = build_dashboard(state, get_settings())["crosscheck"]
+
+        assert cc["data_confidence"] == 0.5
+        assert cc["macro_confidence"] == 1.0
+
+    def test_行情双源核对计数(self):
+        crossed = AssetCandidate(
+            symbol="600519", market="A", asset_class="equity", name="贵州茅台",
+            currency="CNY", r_level="R3",
+            metrics={"consensus": {"price": {"sources": ["tencent", "sina"]}},
+                     "data_confidence": 0.99},
+        )
+        single = AssetCandidate(
+            symbol="000858", market="A", asset_class="equity", name="五粮液",
+            currency="CNY", r_level="R3",
+            metrics={"consensus": {"price": {"sources": ["tencent"]}},
+                     "data_confidence": 0.5},
+        )
+        state = self._state({}, equity=[crossed, single],
+                            equity_event={"data_disagreement": ["300750"]})
+        mq = build_dashboard(state, get_settings())["crosscheck"]["market_data_quality"]
+
+        assert mq == {"candidates": 2, "cross_checked": 1,
+                      "disputed": ["300750"], "min_confidence": 0.5}
+
+
+class TestExpertsPanelShowsRanking:
+    def test_排序方式与因子分入面板(self):
+        state = AdvisoryState(
+            profile=_c3_profile(),
+            trace_events=[{"node": "equity", "ts": 1.0, "ranking": {
+                "method": "factor",
+                "top": [{"symbol": "600519", "market": "A", "score": 0.83,
+                         "z": {"value": 1.2, "low_vol": 0.4}}],
+                "thin_evidence": ["000858"],
+            }}],
+            status="done",
+        )
+        equity = build_dashboard(state, get_settings())["experts"]["equity"]
+
+        assert equity["ranking"]["method"] == "factor"
+        assert equity["ranking"]["top"][0]["symbol"] == "600519"
+        assert equity["ranking"]["thin_evidence"] == ["000858"]
+
+    def test_默认离线跑出来是规模优先(self):
+        from wealthwise.runner import run_advisory
+
+        state = run_advisory(_c3_profile(), build_sample_deps())
+        equity = build_dashboard(state, get_settings())["experts"]["equity"]
+        assert equity["ranking"]["method"] == "quality"

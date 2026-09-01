@@ -9,7 +9,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from wealthwise.llm import ModelClient
-from wealthwise.providers.base import FXProvider, MacroProvider, MarketProvider
+from wealthwise.providers.base import (
+    FXProvider,
+    HistoryProvider,
+    MacroProvider,
+    MarketProvider,
+)
 from wealthwise.rag.embed import Embedder
 from wealthwise.rag.store import Retriever
 
@@ -36,10 +41,22 @@ class AdvisoryDeps:
     # --- optional embedder (for future per-run RAG indexing) ---
     embedder: Embedder | None = None
 
+    # --- optional daily price history (momentum / realized volatility) ---
+    # Only consulted when factor scoring is on. Optional because the offline
+    # stack has no history source: sample candidates already carry a
+    # `volatility` metric, so three of the five factors still score without it.
+    history: HistoryProvider | None = None
+
     # --- domain threshold params ---
     max_fx_exposure: float = 0.5          # max fraction of portfolio in non-CNY
     risk_budget_method: str = "risk_parity"  # "risk_parity" | "equal_weight"
     max_llm_judgments: int = 12           # budget guardrail: max jury calls per run
+    # Rank equity candidates by the multi-factor composite instead of the
+    # size-then-valuation rule. Mirrors settings.enable_factor_scoring; carried
+    # on deps so a test can flip it without touching process-wide config.
+    enable_factor_scoring: bool = False
+    # Exclude candidates whose price two feeds disagree on from selection.
+    drop_on_data_disagreement: bool = True
     # Fraction of *PASS* verdicts the jury also reviews (0..1, deterministic per
     # profile). Cross-validation used to fire only where the rules already said
     # DOWNGRADE/REJECT — it double-checked true positives only, while the

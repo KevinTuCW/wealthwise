@@ -38,6 +38,19 @@ class MacroProvider(Protocol):
 
 
 @runtime_checkable
+class HistoryProvider(Protocol):
+    """Source of daily price history, for the factors a spot quote cannot carry."""
+
+    def enrich(self, candidates: list[AssetCandidate]) -> list[AssetCandidate]:
+        """Return the candidates with `momentum` / `volatility` metrics filled in.
+
+        Best-effort: a candidate with no retrievable history comes back
+        unchanged rather than being dropped.
+        """
+        ...
+
+
+@runtime_checkable
 class FXProvider(Protocol):
     """Source of FX spot rates."""
 

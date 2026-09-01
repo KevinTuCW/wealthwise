@@ -47,17 +47,31 @@ def macro_node(state: AdvisoryState, deps) -> dict:
     dict
         State increment with keys: macro_view, tokens_used, trace_events, notes.
     """
-    # 1. Fetch macro snapshot
+    # 1. Fetch macro snapshot (already reconciled across publishers when the
+    #    provider is a ConsensusMacroProvider — see providers/consensus_provider.py)
     snapshot = deps.macro.snapshot()
+    consensus = snapshot.get("consensus") or {}
+    contested = list(snapshot.get("disagreement") or [])
+    data_confidence = (
+        round(min(c.get("confidence", 0.0) for c in consensus.values()), 4)
+        if consensus else None
+    )
 
     # 2. Retrieve research snippets (wrap each as untrusted before embedding in prompt)
     snippets = deps.research_retriever.search(_RESEARCH_QUERY, k=2)
     safe_snippets = [neutralize_untrusted(d.text) for d in snippets]
     context_block = "\n".join(safe_snippets)
 
-    # 3. Build jury prompt
+    # 3. Build jury prompt. A contested signal is stated as contested: the jury is
+    #    being asked to judge on this data, and "CPI is 2.1%" and "one publisher
+    #    says 2.1% and another says 3.4%" are different inputs to that judgment.
+    caveat = (
+        f"\n\nData caveat: publishers disagree on {', '.join(contested)}; "
+        "treat those figures as uncertain.\n"
+        if contested else ""
+    )
     user_prompt = (
-        f"Macro snapshot: {snapshot}\n\n"
+        f"Macro snapshot: {snapshot}{caveat}\n\n"
         f"Research context:\n{context_block}\n\n"
         "What is the overall equity tilt? Respond with: overweight, neutral, or underweight."
     )
@@ -69,7 +83,11 @@ def macro_node(state: AdvisoryState, deps) -> dict:
     if tilt is None:
         tilt = "neutral"
 
-    # 5. Build macro_view summary
+    # 5. Build macro_view summary.
+    #    `confidence` stays the jury's — the two pillars answer different
+    #    questions ("do the models agree on the call?" versus "do the publishers
+    #    agree on the inputs?") and blending them into one number would leave
+    #    nobody able to tell which one had gone soft.
     macro_view = {
         "snapshot": snapshot,
         "tilt": tilt,
@@ -77,6 +95,10 @@ def macro_node(state: AdvisoryState, deps) -> dict:
         "escalate": jury_result.escalate,
         "tokens": jury_result.tokens,
         "as_of": snapshot.get("as_of"),
+        "data_confidence": data_confidence,
+        "signal_consensus": consensus,
+        "contested_signals": contested,
+        "sources": list(snapshot.get("sources") or []),
     }
 
     tokens_added = jury_result.tokens
@@ -85,10 +107,13 @@ def macro_node(state: AdvisoryState, deps) -> dict:
         "ts": time.time(),
         "tilt": tilt,
         "confidence": jury_result.confidence,
+        "data_confidence": data_confidence,
+        "contested_signals": contested,
         "tokens": tokens_added,
     }
     note = (
         f"macro_node: tilt={tilt} confidence={jury_result.confidence:.2f} "
+        f"data_confidence={data_confidence} contested={contested or 'none'} "
         f"escalate={jury_result.escalate} tokens={tokens_added}"
     )
 

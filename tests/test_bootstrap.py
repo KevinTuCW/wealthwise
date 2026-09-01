@@ -13,15 +13,25 @@ class TestBuildSampleDeps:
         assert isinstance(deps, AdvisoryDeps)
 
     def test_providers_are_sample_types(self):
-        """Sample deps must use offline sample providers (not real AkShare)."""
+        """Sample deps must use offline sample providers (not real AkShare).
+
+        Market and macro arrive wrapped in the consensus layer — the offline
+        stack runs the same reconciliation path production does, registered with
+        the one source it has — so the check is on what the wrapper wraps.
+        """
+        from wealthwise.providers.consensus_provider import (
+            ConsensusMacroProvider, ConsensusMarketProvider,
+        )
         from wealthwise.providers.sample import (
             SampleFXProvider, SampleMacroProvider, SampleMarketProvider,
         )
         from wealthwise.bootstrap import build_sample_deps
 
         deps = build_sample_deps()
-        assert isinstance(deps.market, SampleMarketProvider)
-        assert isinstance(deps.macro, SampleMacroProvider)
+        assert isinstance(deps.market, ConsensusMarketProvider)
+        assert isinstance(deps.macro, ConsensusMacroProvider)
+        assert all(isinstance(s, SampleMarketProvider) for s in deps.market.sources)
+        assert all(isinstance(s, SampleMacroProvider) for s in deps.macro.sources)
         assert isinstance(deps.fx, SampleFXProvider)
 
     def test_jury_clients_are_offline(self):
@@ -110,9 +120,11 @@ class TestBuildRuntimeDeps:
         deps = build_runtime_deps(settings)
 
         assert isinstance(deps, AdvisoryDeps)
-        # Should fall back to sample providers
+        # Should fall back to sample providers — wrapped in the consensus layer,
+        # which the offline stack runs too (one source, confidence 0.5).
         from wealthwise.providers.sample import SampleMarketProvider
-        assert isinstance(deps.market, SampleMarketProvider)
+
+        assert all(isinstance(src, SampleMarketProvider) for src in deps.market.sources)
         # Should use offline jury
         for client in deps.jury_clients:
             assert isinstance(client, OfflineJuryClient)

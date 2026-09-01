@@ -12,6 +12,11 @@ from __future__ import annotations
 from wealthwise.config import Settings, get_settings
 from wealthwise.agents.deps import AdvisoryDeps
 from wealthwise.llm import Verdict
+from wealthwise.providers.consensus_provider import (
+    ConsensusMacroProvider,
+    ConsensusMarketProvider,
+    QualitativeMacroSource,
+)
 from wealthwise.providers.sample import SampleFXProvider, SampleMacroProvider, SampleMarketProvider
 from wealthwise.rag.corpus import load_policy_retriever, load_research_retriever
 from wealthwise.rag.embed import LocalHashingEmbedder
@@ -113,14 +118,20 @@ def build_sample_deps(settings: Settings | None = None) -> AdvisoryDeps:
 
     Uses SampleMarket/Macro/FXProvider, OfflineJuryClient (×2), and the
     local hashing embedder — no network, no API keys.
+
+    The consensus wrappers are in the offline path too, registered with the one
+    source that exists offline. That is not ceremony: it means the reconciliation
+    layer is exercised by every test and every eval case, and it reports the
+    truthful "one source, confidence 0.5" rather than the pipeline quietly taking
+    a different route offline than the one it takes in production.
     """
     s = settings or get_settings()
     data_dir = s.sample_data_dir
     embedder = LocalHashingEmbedder(dim=s.embed_dim)
 
     return AdvisoryDeps(
-        market=SampleMarketProvider(data_dir),
-        macro=SampleMacroProvider(data_dir),
+        market=ConsensusMarketProvider([SampleMarketProvider(data_dir)]),
+        macro=ConsensusMacroProvider([SampleMacroProvider(data_dir)]),
         fx=SampleFXProvider(data_dir),
         jury_clients=[
             OfflineJuryClient("offline-a"),
@@ -132,6 +143,8 @@ def build_sample_deps(settings: Settings | None = None) -> AdvisoryDeps:
         max_fx_exposure=s.max_fx_exposure,
         risk_budget_method=s.risk_budget_method,
         max_llm_judgments=s.max_llm_judgments,
+        enable_factor_scoring=s.enable_factor_scoring,
+        drop_on_data_disagreement=s.drop_on_data_disagreement,
     )
 
 
@@ -155,6 +168,9 @@ def build_runtime_deps(settings: Settings | None = None) -> AdvisoryDeps:
         return build_sample_deps(s)
 
     from wealthwise.crosscheck.jury import build_jury_clients
+    from wealthwise.providers.akshare_provider import build_macro_sources
+    from wealthwise.providers.history import TencentHistoryProvider
+    from wealthwise.providers.sina_provider import SinaMarketProvider
     from wealthwise.providers.tencent_provider import TencentMarketProvider
     from wealthwise.providers.universe import Universe
 
@@ -167,14 +183,27 @@ def build_runtime_deps(settings: Settings | None = None) -> AdvisoryDeps:
 
     data_dir = s.sample_data_dir
     base_embedder_offline = LocalHashingEmbedder(dim=s.embed_dim)
+    universe = Universe.load()
 
     return AdvisoryDeps(
-        # Quote-based provider over qt.gtimg.cn. Replaces the AkShare eastmoney
-        # screener, which resolves and handshakes but is reset mid-stream on
-        # roughly two calls in three — see providers/tencent_provider.py.
-        market=TencentMarketProvider(Universe.load()),
-        macro=SampleMacroProvider(data_dir),  # AkShare macro not yet wired
+        # Two independent quote feeds, primary first. Tencent screens (it carries
+        # P/E, P/B, market cap and turnover); Sina corroborates. The eastmoney
+        # screener is not in this list at all — it resolves and handshakes, then
+        # is reset mid-stream on roughly two calls in three.
+        market=ConsensusMarketProvider([
+            TencentMarketProvider(universe),
+            SinaMarketProvider(universe),
+        ]),
+        # LPR plus two independent CPI publishers. The rate has one publisher and
+        # is reported at confidence 0.5; CPI has two and is genuinely reconciled.
+        # The sample snapshot comes last, stripped of its numbers, purely to
+        # supply the qualitative view blocks no free feed publishes.
+        macro=ConsensusMacroProvider([
+            *build_macro_sources(),
+            QualitativeMacroSource(SampleMacroProvider(data_dir), name="sample-views"),
+        ]),
         fx=SampleFXProvider(data_dir),         # AkShare FX not yet wired
+        history=TencentHistoryProvider(universe),
         jury_clients=build_jury_clients(s),
         policy_retriever=load_policy_retriever(data_dir, base_embedder_offline),
         research_retriever=load_research_retriever(data_dir, base_embedder_offline),
@@ -182,4 +211,6 @@ def build_runtime_deps(settings: Settings | None = None) -> AdvisoryDeps:
         max_fx_exposure=s.max_fx_exposure,
         risk_budget_method=s.risk_budget_method,
         max_llm_judgments=s.max_llm_judgments,
+        enable_factor_scoring=s.enable_factor_scoring,
+        drop_on_data_disagreement=s.drop_on_data_disagreement,
     )

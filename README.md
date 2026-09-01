@@ -24,7 +24,7 @@
 
 > **教育演示声明**
 >
-> WealthWise 是为「武道AI 阵03」实战案例系列构建的**教育演示项目**。它**不构成投资建议**、**不是真实合规系统**、**不适用于任何真实投顾决策**。其中的投资者适当性规则、风险等级映射与合规语料均为**合成/改写**内容，不代表中国证监会、中国证券投资基金业协会或任何监管机构的实际要求。组合优化器使用的是玩具级风险估计，而非真实协方差数据。请勿用本软件做任何真实理财决策。
+> WealthWise 是为「武道AI 阵03」实战案例系列构建的**教育演示项目**。它**不构成投资建议**、**不是真实合规系统**、**不适用于任何真实投顾决策**。其中的投资者适当性规则、风险等级映射与合规语料均为**合成/改写**内容，不代表中国证监会、中国证券投资基金业协会或任何监管机构的实际要求。组合优化器的单标的波动率虽已取自真实日 K，跨资产相关性仍是一个保守常数，不是真实协方差矩阵；因子权重也未经回测。请勿用本软件做任何真实理财决策。
 
 ---
 
@@ -86,13 +86,16 @@ DONE   （返回完整 trace；开启后同步 Langfuse）
 | --- | --- |
 | 目标规划 Goal | 把投资者目标与期限解析成 `goal_constraints`（R 级上限、外币敞口上限、流动性下限） |
 | 宏观 Macro | 经 RAG 检索宏观上下文（CPI/PMI/利率片段），交陪审出大类资产 tilt |
-| 权益 Equity | 按 R 级适配在 A/港/美股筛选权益与固收候选（不接受跨境则仅 A 股） |
+| 权益 Equity | 按 R 级适配在 A/港/美股筛选权益与固收候选（不接受跨境则仅 A 股）；候选排序两档可切——默认「规模优先」，`ENABLE_FACTOR_SCORING=true` 切到**五因子截面打分** |
 | 风险组合 Portfolio | **两级**风险预算优化器：先按目标定大类中枢（`min_equity`/`max_equity`/`liquidity_min`），再在类内做反波动率（含波动下限与单一标的占比上限）；产出 `PortfolioAllocation` |
 | 合规 Compliance | 中国 C1–C5 适当性检查 + 多模型陪审（GLM 主 + DeepSeek-V3 副）；产出 PASS / DOWNGRADE / REJECT，**陪审只能加严、永不软化 REJECT** |
 
 **双重交叉验证：**
 
-- *多源共识*（支柱一）—— 宏观/量化信号从多个 AkShare 接口汇成中位数，单源读数置信封顶 0.5。
+- *多源共识*（支柱一）—— **行情与宏观两条线都跑真实双源**，中位数调和 + 分歧记名，单源读数置信封顶 0.5（一个源无法自证）。
+  - *行情*：腾讯 `qt.gtimg.cn`（主源，负责筛选与过滤语义）+ 新浪 `hq.sinajs.cn`（佐证源），逐标的逐指标调和 price / market_cap / pe / pb。**价格容差 2%、估值容差 15%**——两个源报同一个交易所的价格本该差不到一个跳动单位，而市盈率口径（滚动窗口、股本基准日）本来就会差，把两者按同一把尺子量只会训练所有人无视告警。价格分歧的标的**不进订单清单**（`DROP_ON_DATA_DISAGREEMENT`），但一定打标进 trace——计数才是「某个源漂了」的可观测量。停牌源报出的 `0.00` 直接不参与中位数：0 和 1299 的中位数是 649，那不是分歧，是被高置信包装过的编造。
+  - *宏观*：AkShare `macro_china_lpr`（基准利率，**单发布方 → 置信 0.5**）+ `macro_china_cpi_yearly`（聚合口径）与 `macro_china_cpi`（统计局口径）两家**独立发布方的 CPI**，经 `SourceRegistry` 真正调和。没有为利率硬凑第二个源：Shibor 与 LPR 量的不是一回事，取中位数会产出一个没人发布、也没人按它借钱的数字。定性视图（大类观点/风险情绪）来自样例快照，但**只投定性票不投数值票**——一个静态 JSON 文件不该给实时读数背书。
+  - 离线档同样走这一层（单源、置信 0.5），所以测试与评测跑的是生产同一条路径，不是另一条更短的。
 - *多模型陪审*（支柱二）—— 合规与宏观判定交给**跨三家实验室的奇数陪审团**（GLM-4.7 智谱 / DeepSeek-V3 / Ling-flash-2.0 蚂蚁）；多数标签胜出（3/3=1.0、2/3≈0.667、三方分歧无多数记 `None`），低置信升级人工复核。奇数才有「多数」可言——两个模型只有「一致」与「平票」两种结果。**PASS 也要复核**：确定性规则只会错在「本该拦却放行」这一侧，所以 PASS 结果按 `jury_review_pass_rate` 抽样复检（默认全查），陪审依旧只能加严。
 
 **三层护栏：**
@@ -108,7 +111,9 @@ DONE   （返回完整 trace；开启后同步 Langfuse）
 | API / 编排 | FastAPI · LangGraph |
 | 主模型 | **GLM-4.7**（z.ai，OpenAI 兼容） |
 | 交叉验证模型 | **DeepSeek-V3** + **Ling-flash-2.0**（均走 SiliconFlow）—— 与 GLM 合成跨三家实验室的奇数陪审团 |
-| 真实行情 | **AkShare**（A/港/美股、基金、宏观、汇率） |
+| 真实行情 | **腾讯 qt.gtimg.cn**（主源：报价/市盈/市净/市值/换手）+ **新浪 hq.sinajs.cn**（佐证源）双源共识 |
+| 真实历史 | **腾讯日 K**（`web.ifzq.gtimg.cn`）—— 60 日动量与已实现波动，并发抓取（实测 20 标的 0.4s / 8 并发） |
+| 真实宏观 | **AkShare**（LPR + 两家 CPI 发布方；基金、汇率待接） |
 | 离线运行时 | 样例 Provider + 本地哈希嵌入 + 内存向量库 + 离线陪审（零 key、零网络） |
 | RAG | 内存余弦向量库 + 本地哈希嵌入；检索宏观上下文与合规/研报语料 |
 | 可观测 | **Langfuse** v4（可选）+ 每次响应返回内部 trace 树 |
@@ -129,7 +134,7 @@ python3 -m venv .venv
 .venv/bin/pip install -e '.[dev,llm]'
 
 # 3. 跑测试（离线、hermetic）
-make test           # → 370 passed
+make test           # → 503 passed
 
 # 4. 跑评测门禁（离线、硬门）
 make eval           # → 64/64（离线档），适当性漏判 0，配置合理性 100%，注入拦截 100%
@@ -274,7 +279,9 @@ intake → input_guard → planner → budget_macro → macro → equity
 
 | 变量 | 说明 |
 | --- | --- |
-| `USE_REAL_PROVIDERS` | `true` 启用 AkShare 数据 + 真实 LLM 陪审（默认 `false`） |
+| `USE_REAL_PROVIDERS` | `true` 启用真实数据（腾讯+新浪双源行情 / AkShare 宏观 / 腾讯日 K）+ 真实 LLM 陪审（默认 `false`） |
+| `ENABLE_FACTOR_SCORING` | `true` 切到五因子截面打分选股（默认 `false`，见下节「多因子打分」） |
+| `DROP_ON_DATA_DISAGREEMENT` | 两源报价分歧超容差时是否把标的排除出选股（默认 `true`；关掉也仍打标进 trace） |
 | `GLM_API_KEY` / `GLM_BASE_URL` | 主模型（GLM-4.7，z.ai OpenAI 兼容网关） |
 | `SILICONFLOW_API_KEY` | 交叉验证陪审模型 key（SiliconFlow） |
 | `CROSSCHECK_MODEL` | 第二陪审员（默认 `deepseek-ai/DeepSeek-V3`） |
@@ -287,6 +294,26 @@ intake → input_guard → planner → budget_macro → macro → equity
 | `RISK_BUDGET_METHOD` | 组合优化方法：`risk_parity`（默认；其他方法预留，未实现即 `NotImplementedError`） |
 | `RUN_STORE` | 审计持久化：`memory`（默认）或 `sqlite` |
 | `TOKEN_PRICE_PER_1K` | 成本核算用的混合 $/1k tokens 单价 |
+
+## 多因子打分
+
+`ENABLE_FACTOR_SCORING=true` 时，权益候选的排序从「规模优先、估值破同分」换成五因子截面复合分。
+
+| 因子 | 输入 | 方向与理由 |
+| --- | --- | --- |
+| 价值 value | 由 P/E 得 E/P、由 P/B 得 B/P，取二者均值 | 便宜更好。**用收益率而非比率**：P/E 上不封顶且过零点不连续，一个 900 倍的市盈率能靠自己决定整个市场的排名；E/P 有界，亏损公司自然落到负数，那正是它该得的名次 |
+| 动量 momentum | 60 个交易日收益，**跳过最近 5 日** | winners keep winning。跳过不是修饰：不跳的话因子被短期反转主导，最后买的是刚暴涨的、卖的是刚回调的，跟它名字的意思正好相反 |
+| 低波 low_vol | 已实现波动率（日对数收益年化） | 越低越好（low-volatility anomaly），也是五个因子里跟适当性目标最对齐的一个 |
+| 规模 size | log10(市值) | **越大越好——故意反着学术上的小盘溢价用**。这本组合服务的是适当性与流动性，不是最大化预期收益；不该拿微盘的风险溢价去回答一个 C2 投资者 |
+| 流动性 liquidity | 换手率，**封顶 5%** | 可交易性。封顶而非单调：过了每天几个百分点，多出来的换手是投机不是流动性，单调的话每次排第一的都是当天最热的票 |
+
+**怎么算**：每个因子在**单一市场内**做截面 z-score（±3σ 裁剪）后加权。按市场分开不是细节——A 股、港股、美股处在不同的估值体系里，混在一起 z-score 等于拿市场跟市场比排名，而那件事 `_MARKET_QUOTA` 的地域配额已经在明面上做了。
+
+**缺数据不扣分**：某个因子没数的标的，把它从**自己**的复合分里剔掉、按剩下的因子重新归一，所以一个 3/5 覆盖的标的跟 5/5 的在同一把尺子上比。反过来做（把沉默当作差评）会系统性地压低那些佐证源覆盖较薄的标的，把一个数据覆盖的假象包装成对公司的判断。
+
+**动量与波动从哪来**：`providers/history.py` 拉腾讯日 K（每标的一次请求，`;` 批量形式被服务端拒绝，实测 8 并发下 20 标的 0.4s）。只对**过了风险上限、还在竞争名额**的标的拉，不对整个筛选结果拉。
+
+顺带补上的一个洞：`optimize.py` 按类内反波动率加权，缺 `volatility` 时回落到 `DEFAULT_VOL = 0.15`——而此前**没有任何真实 Provider 提供这个字段**，所以每次真实运行都在把货币基金和小盘股当作同样的风险，反波动率加权其实是等权的一种复杂写法。现在已实现波动率是真的（实测区间 0.18–1.05）。
 
 ## 项目结构
 
@@ -334,10 +361,10 @@ wealthwise/
 │   ├── compliance/             # suitability.py（C-R 硬门）· language.py（误导用语检测）
 │   ├── guardrails/             # input.py · output.py · process.py
 │   ├── portfolio/              # metrics.py（纯函数）· optimize.py（风险预算）
-│   ├── providers/              # SampleProvider · AkShareProvider（Protocol）· consensus · registry
+│   ├── providers/              # tencent（主源）· sina（佐证源）· consensus_provider（共识层）· history（日K）· akshare（宏观多发布方）· sample · registry
 │   ├── rag/                    # embed（本地哈希）· store（内存余弦）· corpus
 │   └── security/               # sanitize.py（注入检测）· redact.py（PII 脱敏）
-└── tests/                      # pytest（370 passed，conftest 强制隔离开发者 .env）
+└── tests/                      # pytest（503 passed，conftest 强制隔离开发者 .env）
 ```
 
 ## 路线图 / 诚实的留白
@@ -345,7 +372,8 @@ wealthwise/
 已交付：
 
 - ✅ Supervisor + 5 专家 LangGraph 流水线（目标 / 宏观 / 权益 / 风险组合 / 合规）
-- ✅ 多源共识（支柱一）+ 多模型陪审（支柱二）
+- ✅ 多源共识（支柱一，行情腾讯+新浪双源 / 宏观 LPR+两家 CPI）+ 多模型陪审（支柱二）
+- ✅ 五因子截面打分（价值 / 动量 / 低波 / 规模 / 流动性），`.env` 开关控制，默认关闭
 - ✅ 三层护栏（输入 / 过程 / 输出）+ 预算护栏
 - ✅ 中国投资者适当性（C1–C5）+ 跨境汇率规则 + 误导用语检测
 - ✅ A/港/美股覆盖（样例 Provider + AkShare 真实 Provider 骨架）
@@ -361,7 +389,8 @@ wealthwise/
 - **AkShare 列名校准** —— `src/wealthwise/providers/akshare_provider.py` 中每处列名假设都标了 `TODO(live-calibration)`，投产前需对着真实 AkShare 输出核对。经 keyed 验证：基金（`fund_open_fund_daily_em`）与宏观（`macro_china_lpr`）实时可达且列名已核，A 股实时行情 `stock_zh_a_spot_em` 的主机在验证网络里被 SSL 挡住（环境限制），详见 [`docs/real-data-verification.md`](docs/real-data-verification.md)。
 - **辩论 / 层级式多智能体** —— 当前陪审是扁平多数投票；结构化辩论回环（Supervisor 调解专家分歧）是后续工作。
 - **Postgres 运行存储** —— schema 已在 `store.py` 预留，当前仅实现 `memory` 与 `sqlite`。
-- **真实协方差数据** —— 组合优化器用的是样例 Provider 的玩具级风险估计。真实均值方差 / Black-Litterman 需要来自真实价格历史的协方差矩阵。
+- **真实协方差矩阵** —— 单标的波动率已经是真的了（腾讯日 K 的已实现波动，实测区间 0.18–1.05；此前每个真实标的都在吃 `DEFAULT_VOL=0.15` 这个常数，所谓反波动率加权其实等于等权）。**相关性还不是**：优化器仍用 `ASSUMED_CROSS_CORR=0.3` 一个常数。真实均值方差 / Black-Litterman 需要完整协方差矩阵。
+- **因子权重未回测** —— `portfolio/factors.py` 里的 25/25/20/15/15 是房间观点，不是本 universe 上的回测结果。这也正是 `ENABLE_FACTOR_SCORING` **默认关闭**的原因：一个看起来很量化却没验证过的公式，比一条诚实好读的规则更糟。规模因子还**故意反着academic SMB 用**（越大越好）——这本组合服务的是适当性与流动性，不是最大化预期收益。
 - **付费数据源** —— 面向中国市场的付费量化数据（如 Wind、iFinD）未接入；AkShare Provider 仅覆盖公开数据。
 
 ## 许可

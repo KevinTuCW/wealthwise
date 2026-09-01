@@ -27,7 +27,7 @@ GBK-encoded lines of `v_<symbol>="f0~f1~f2~...";`. Field positions verified live
 against all three markets:
 
     [1]  name          [2]  code          [3]  last price
-    [39] P/E (TTM)     [45] market cap (100M, local currency)
+    [38] turnover %    [39] P/E (TTM)     [45] market cap (100M, local currency)
     [46] P/B  —  A-shares only; HK/US carry the English name at this position
     [60] board lot  —  HK only
 
@@ -54,6 +54,9 @@ _TIMEOUT = 15
 _F_NAME = 1
 _F_CODE = 2
 _F_PRICE = 3
+# Daily turnover as a percentage of float. Reported by all three markets, and the
+# only tradability signal in the payload — the factor model's liquidity input.
+_F_TURNOVER = 38
 _F_PE = 39
 _F_MCAP = 45
 _F_PB = 46
@@ -144,6 +147,10 @@ def _map_quote_row(fields: list[str], market: str,
     price = _to_float(fields[_F_PRICE])
     if price is not None:
         metrics["price"] = price
+    if len(fields) > _F_TURNOVER:
+        turnover = _to_float(fields[_F_TURNOVER])
+        if turnover is not None:
+            metrics["turnover"] = turnover
     if len(fields) > _F_MCAP:
         mcap = _to_float(fields[_F_MCAP])
         if mcap is not None:
@@ -203,6 +210,9 @@ class TencentMarketProvider:
         Symbol universe backing `screen()`. Injected so tests and the refresh
         script can supply their own list without touching the network.
     """
+
+    #: Label this feed's readings carry in the consensus record.
+    name = "tencent"
 
     def __init__(self, universe: Universe) -> None:
         self._universe = universe

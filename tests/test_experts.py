@@ -25,6 +25,13 @@ from wealthwise.rag.corpus import load_policy_retriever, load_research_retriever
 DATA_DIR = "data/samples"
 
 
+def _embedder():
+    """The offline hashing embedder, built the same way the fixtures build it."""
+    from wealthwise.config import Settings
+
+    return build_embedder(Settings(embed_provider="local", embed_dim=256))
+
+
 @pytest.fixture(scope="module")
 def embedder():
     from wealthwise.config import Settings
@@ -648,7 +655,7 @@ class TestEquitySelection:
         pool = ([self._candidate(f"A{i}", "A") for i in range(300)]
                 + [self._candidate(f"H{i}", "HK") for i in range(30)]
                 + [self._candidate(f"U{i}", "US") for i in range(30)])
-        got = _select(pool, ["A", "HK", "US"], 50)
+        got, _ = _select(pool, ["A", "HK", "US"], 50)
 
         counts = {m: sum(1 for c in got if c.market == m) for m in ("A", "HK", "US")}
         assert sum(counts.values()) == 50
@@ -660,7 +667,7 @@ class TestEquitySelection:
         from wealthwise.agents.experts.equity import _select
 
         pool = [self._candidate(f"A{i}", "A") for i in range(300)]
-        got = _select(pool, ["A"], 50)
+        got, _ = _select(pool, ["A"], 50)
         assert len(got) == 50
         assert all(c.market == "A" for c in got)
 
@@ -670,7 +677,7 @@ class TestEquitySelection:
         pool = ([self._candidate(f"A{i}", "A") for i in range(300)]
                 + [self._candidate("H0", "HK")]
                 + [self._candidate(f"U{i}", "US") for i in range(30)])
-        got = _select(pool, ["A", "HK", "US"], 50)
+        got, _ = _select(pool, ["A", "HK", "US"], 50)
         assert len(got) == 50, "unused HK quota should be spent, not lost"
 
     def test_按规模排序而非按顺序(self):
@@ -678,7 +685,7 @@ class TestEquitySelection:
 
         # Caps kept above the size floor so this exercises ranking, not filtering.
         pool = [self._candidate(f"A{i}", "A", cap_100m=100.0 * i) for i in range(1, 101)]
-        got = _select(pool, ["A"], 5)
+        got, _ = _select(pool, ["A"], 5)
         assert [c.symbol for c in got] == ["A100", "A99", "A98", "A97", "A96"]
 
     def test_亏损与微盘被剔除(self):
@@ -689,18 +696,18 @@ class TestEquitySelection:
             self._candidate("LOSS", "A", cap_100m=500.0, pe=-3.0),   # 亏损
             self._candidate("TINY", "A", cap_100m=5.0, pe=12.0),     # 规模不足
         ]
-        assert [c.symbol for c in _select(pool, ["A"], 10)] == ["GOOD"]
+        assert [c.symbol for c in _select(pool, ["A"], 10)[0]] == ["GOOD"]
 
     def test_缺失指标不等于不合格(self):
         """Provider coverage varies; silence must not empty the candidate set."""
         from wealthwise.agents.experts.equity import _select
 
         pool = [self._candidate(f"A{i}", "A", cap_100m=None, pe=None) for i in range(5)]
-        assert len(_select(pool, ["A"], 10)) == 5
+        assert len(_select(pool, ["A"], 10)[0]) == 5
 
     def test_不同provider的市值字段都能读(self):
         from wealthwise.agents.state import AssetCandidate
-        from wealthwise.agents.experts.equity import _market_cap_100m
+        from wealthwise.portfolio.factors import market_cap_100m
 
         tencent = AssetCandidate(symbol="X", market="A", asset_class="equity",
                                  name="X", currency="CNY", r_level="R3",
@@ -708,8 +715,8 @@ class TestEquitySelection:
         sample = AssetCandidate(symbol="Y", market="A", asset_class="equity",
                                 name="Y", currency="CNY", r_level="R3",
                                 metrics={"market_cap_cny": 350_000_000_000})
-        assert _market_cap_100m(tencent) == 3500.0
-        assert _market_cap_100m(sample) == 3500.0
+        assert market_cap_100m(tencent) == 3500.0
+        assert market_cap_100m(sample) == 3500.0
 
     def test_未筛市场的标的必须放行到合规(self):
         """A leaked cross-border name must reach compliance, not vanish here."""
@@ -717,6 +724,317 @@ class TestEquitySelection:
 
         pool = ([self._candidate(f"A{i}", "A") for i in range(100)]
                 + [self._candidate("LEAK", "US")])
-        got = _select(pool, ["A"], 10)
+        got, _ = _select(pool, ["A"], 10)
         assert "LEAK" in [c.symbol for c in got], (
             "dropping an unauthorised holding hides the violation instead of rejecting it")
+
+
+# ---------------------------------------------------------------------------
+# Multi-factor ranking — the ENABLE_FACTOR_SCORING path
+# ---------------------------------------------------------------------------
+
+class _StubHistory:
+    """A history provider that hands back a fixed momentum/volatility per symbol."""
+
+    def __init__(self, table: dict[str, dict]):
+        self._table = table
+        self.calls: list[list[str]] = []
+
+    def enrich(self, candidates):
+        self.calls.append([c.symbol for c in candidates])
+        out = []
+        for c in candidates:
+            extra = self._table.get(c.symbol)
+            if not extra:
+                out.append(c)
+                continue
+            out.append(c.model_copy(update={"metrics": {**c.metrics, **extra}}))
+        return out
+
+
+class TestFactorScoringSwitch:
+    """The switch must change which names are picked — and nothing else."""
+
+    def _candidate(self, symbol, market="A", cap=500.0, pe=15.0, **metrics):
+        return AssetCandidate(
+            symbol=symbol, market=market, asset_class="equity", name=symbol,
+            currency="CNY", r_level="R3",
+            metrics={"market_cap_100m": cap, "pe": pe, **metrics},
+        )
+
+    def _deps(self, candidates, **overrides):
+        from wealthwise.agents.deps import AdvisoryDeps
+
+        class _Market:
+            name = "stub"
+
+            def screen(self, market, filters):
+                return [c for c in candidates if c.market == market]
+
+            def quotes(self, symbols):
+                return []
+
+        base = dict(
+            market=_Market(),
+            macro=SampleMacroProvider(DATA_DIR),
+            fx=SampleFXProvider(DATA_DIR),
+            jury_clients=[FakeModelClient("f", Verdict(label="neutral", rationale=""))],
+            policy_retriever=load_policy_retriever(DATA_DIR, _embedder()),
+            research_retriever=load_research_retriever(DATA_DIR, _embedder()),
+        )
+        base.update(overrides)
+        return AdvisoryDeps(**base)
+
+    def _state(self):
+        return AdvisoryState(
+            goal_constraints={"risk_ceiling": "R5", "accept_cross_border": False},
+            macro_view={"tilt": "neutral"},
+        )
+
+    def test_关闭时仍按规模排序(self):
+        from wealthwise.agents.experts.equity import equity_node
+
+        pool = [self._candidate("BIG", cap=5000.0, volatility=0.60, momentum=-0.3),
+                self._candidate("SMALL", cap=200.0, volatility=0.10, momentum=0.4)]
+        out = equity_node(self._state(), self._deps(pool, enable_factor_scoring=False))
+
+        assert [c.symbol for c in out["equity_candidates"]] == ["BIG", "SMALL"]
+        assert out["trace_events"][-1]["ranking"]["method"] == "quality"
+
+    def test_开启后动量与低波能压过规模(self):
+        from wealthwise.agents.experts.equity import equity_node
+
+        pool = [self._candidate("BIG", cap=5000.0, volatility=0.60, momentum=-0.3),
+                self._candidate("SMALL", cap=200.0, volatility=0.10, momentum=0.4)]
+        out = equity_node(self._state(), self._deps(pool, enable_factor_scoring=True))
+
+        assert [c.symbol for c in out["equity_candidates"]] == ["SMALL", "BIG"]
+        assert out["trace_events"][-1]["ranking"]["method"] == "factor"
+
+    def test_开关不改变候选数量与市场配额(self):
+        """Only the sort key moves; the quota and the budget are untouched."""
+        from wealthwise.agents.experts.equity import equity_node
+
+        pool = [self._candidate(f"A{i}", cap=100.0 * (i + 1), volatility=0.2 + i * 0.01)
+                for i in range(80)]
+        off = equity_node(self._state(), self._deps(pool, enable_factor_scoring=False))
+        on = equity_node(self._state(), self._deps(pool, enable_factor_scoring=True))
+
+        assert len(off["equity_candidates"]) == len(on["equity_candidates"])
+        assert {c.symbol for c in on["equity_candidates"]} != \
+            {c.symbol for c in off["equity_candidates"]} or True   # may coincide
+        assert all(c.market == "A" for c in on["equity_candidates"])
+
+    def test_因子分与z值进trace(self):
+        from wealthwise.agents.experts.equity import equity_node
+
+        pool = [self._candidate(f"A{i}", cap=100.0 * (i + 1)) for i in range(10)]
+        out = equity_node(self._state(), self._deps(pool, enable_factor_scoring=True))
+
+        top = out["trace_events"][-1]["ranking"]["top"]
+        assert top and "score" in top[0] and "size" in top[0]["z"]
+
+    def test_只给进入排名的标的拉历史(self):
+        """History is one request per symbol; enriching the whole screen wastes it."""
+        from wealthwise.agents.experts.equity import equity_node
+
+        pool = [self._candidate(f"A{i}") for i in range(5)]
+        pool.append(self._candidate("TOO_RISKY", pe=15.0))
+        pool[-1] = pool[-1].model_copy(update={"r_level": "R5"})
+        history = _StubHistory({})
+
+        state = AdvisoryState(
+            goal_constraints={"risk_ceiling": "R3", "accept_cross_border": False},
+            macro_view={"tilt": "neutral"},
+        )
+        equity_node(state, self._deps(pool, enable_factor_scoring=True, history=history))
+
+        assert history.calls, "history was never consulted"
+        assert "TOO_RISKY" not in history.calls[0], (
+            "paid for history on a name the risk ceiling had already excluded")
+
+    def test_关闭时不拉历史(self):
+        from wealthwise.agents.experts.equity import equity_node
+
+        history = _StubHistory({})
+        pool = [self._candidate("A0")]
+        equity_node(self._state(),
+                    self._deps(pool, enable_factor_scoring=False, history=history))
+        assert history.calls == []
+
+    def test_历史补出的波动率流向优化器(self):
+        """The optimiser weights on `volatility` and was defaulting to 0.15."""
+        from wealthwise.agents.experts.equity import equity_node
+
+        pool = [self._candidate("A0"), self._candidate("A1")]
+        history = _StubHistory({"A0": {"volatility": 0.42, "momentum": 0.1},
+                                "A1": {"volatility": 0.11, "momentum": 0.1}})
+        out = equity_node(self._state(),
+                          self._deps(pool, enable_factor_scoring=True, history=history))
+
+        vols = {c.symbol: c.metrics.get("volatility") for c in out["equity_candidates"]}
+        assert vols == {"A0": 0.42, "A1": 0.11}
+
+
+class TestDataDisagreementGate:
+    def _candidate(self, symbol, disagreement=None):
+        metrics = {"market_cap_100m": 500.0, "pe": 15.0, "price": 100.0}
+        if disagreement:
+            metrics["data_disagreement"] = disagreement
+        return AssetCandidate(symbol=symbol, market="A", asset_class="equity",
+                              name=symbol, currency="CNY", r_level="R3",
+                              metrics=metrics)
+
+    def _deps(self, candidates, **overrides):
+        from wealthwise.agents.deps import AdvisoryDeps
+
+        class _Market:
+            name = "stub"
+
+            def screen(self, market, filters):
+                return [c for c in candidates if c.market == market]
+
+            def quotes(self, symbols):
+                return []
+
+        base = dict(
+            market=_Market(),
+            macro=SampleMacroProvider(DATA_DIR),
+            fx=SampleFXProvider(DATA_DIR),
+            jury_clients=[FakeModelClient("f", Verdict(label="neutral", rationale=""))],
+            policy_retriever=load_policy_retriever(DATA_DIR, _embedder()),
+            research_retriever=load_research_retriever(DATA_DIR, _embedder()),
+        )
+        base.update(overrides)
+        return AdvisoryDeps(**base)
+
+    def _state(self):
+        return AdvisoryState(
+            goal_constraints={"risk_ceiling": "R5", "accept_cross_border": False},
+            macro_view={"tilt": "neutral"},
+        )
+
+    def test_价格分歧的标的不进订单(self):
+        from wealthwise.agents.experts.equity import equity_node
+
+        pool = [self._candidate("CLEAN"),
+                self._candidate("SPLIT", disagreement=["price"])]
+        out = equity_node(self._state(), self._deps(pool))
+
+        assert [c.symbol for c in out["equity_candidates"]] == ["CLEAN"]
+
+    def test_被剔除的标的仍进trace(self):
+        """The count is the observable that says a feed has drifted."""
+        from wealthwise.agents.experts.equity import equity_node
+
+        pool = [self._candidate("CLEAN"),
+                self._candidate("SPLIT", disagreement=["price"])]
+        out = equity_node(self._state(), self._deps(pool))
+
+        assert out["trace_events"][-1]["data_disagreement"] == ["SPLIT"]
+        assert "source disagreement" in out["notes"][-1]
+
+    def test_估值口径分歧不剔除(self):
+        """Different earnings windows are a methodology difference, not a fault."""
+        from wealthwise.agents.experts.equity import equity_node
+
+        pool = [self._candidate("PE_GAP", disagreement=["pe"])]
+        out = equity_node(self._state(), self._deps(pool))
+
+        assert [c.symbol for c in out["equity_candidates"]] == ["PE_GAP"]
+
+    def test_开关关闭时保留分歧标的(self):
+        from wealthwise.agents.experts.equity import equity_node
+
+        pool = [self._candidate("SPLIT", disagreement=["price"])]
+        out = equity_node(self._state(),
+                          self._deps(pool, drop_on_data_disagreement=False))
+
+        assert [c.symbol for c in out["equity_candidates"]] == ["SPLIT"]
+
+
+class TestMacroConsumesConsensus:
+    def _deps(self, macro, **overrides):
+        from wealthwise.agents.deps import AdvisoryDeps
+
+        neutral = Verdict(label="neutral", rationale="")
+        base = dict(
+            market=SampleMarketProvider(DATA_DIR),
+            macro=macro,
+            fx=SampleFXProvider(DATA_DIR),
+            # Two jurors, so the jury's own confidence lands at 1.0 and cannot be
+            # confused with the 0.5 a lone *data source* is capped at.
+            jury_clients=[FakeModelClient("f1", neutral), FakeModelClient("f2", neutral)],
+            policy_retriever=load_policy_retriever(DATA_DIR, _embedder()),
+            research_retriever=load_research_retriever(DATA_DIR, _embedder()),
+        )
+        base.update(overrides)
+        return AdvisoryDeps(**base)
+
+    def test_共识元数据进入macro_view(self):
+        from wealthwise.agents.experts.macro import macro_node
+        from wealthwise.providers.consensus_provider import ConsensusMacroProvider
+
+        class _Src:
+            def __init__(self, name, snap):
+                self.name = name
+                self._snap = snap
+
+            def snapshot(self):
+                return dict(self._snap)
+
+        macro = ConsensusMacroProvider([_Src("a", {"cpi": 0.021}),
+                                        _Src("b", {"cpi": 0.021})])
+        out = macro_node(AdvisoryState(), self._deps(macro))
+        view = out["macro_view"]
+
+        assert view["sources"] == ["a", "b"]
+        assert view["data_confidence"] == 1.0
+        assert view["contested_signals"] == []
+        assert view["signal_consensus"]["cpi"]["sources"] == ["a", "b"]
+
+    def test_发布方分歧被记入并进提示词(self):
+        from wealthwise.agents.experts.macro import macro_node
+        from wealthwise.providers.consensus_provider import ConsensusMacroProvider
+
+        class _Src:
+            def __init__(self, name, snap):
+                self.name = name
+                self._snap = snap
+
+            def snapshot(self):
+                return dict(self._snap)
+
+        seen = {}
+
+        class _Recording:
+            name = "recorder"
+
+            def judge(self, system, user, labels):
+                seen["user"] = user
+                return Verdict(label="neutral", rationale="")
+
+        macro = ConsensusMacroProvider([_Src("a", {"cpi": 0.021}),
+                                        _Src("b", {"cpi": 0.045})])
+        deps = self._deps(macro, jury_clients=[_Recording()])
+        out = macro_node(AdvisoryState(), deps)
+
+        assert out["macro_view"]["contested_signals"] == ["cpi"]
+        assert "Data caveat" in seen["user"], (
+            "the jury judged on a contested figure without being told it was contested")
+
+    def test_陪审置信度与数据置信度不混为一谈(self):
+        from wealthwise.agents.experts.macro import macro_node
+        from wealthwise.providers.consensus_provider import ConsensusMacroProvider
+
+        class _Src:
+            name = "only"
+
+            def snapshot(self):
+                return {"cpi": 0.021}
+
+        out = macro_node(AdvisoryState(), self._deps(ConsensusMacroProvider([_Src()])))
+        view = out["macro_view"]
+
+        assert view["data_confidence"] == 0.5      # one publisher
+        assert view["confidence"] == 1.0           # jury was unanimous

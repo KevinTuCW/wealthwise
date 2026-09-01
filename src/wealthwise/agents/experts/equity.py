@@ -2,13 +2,24 @@
 
 Screens across A / HK / US markets using goal_constraints (risk_ceiling,
 accept_cross_border) and macro_view tilt to filter and annotate candidates.
-No LLM call needed here — purely deterministic rule-based screening.
+No LLM call needed here — purely deterministic rule-based screening and ranking.
+
+Ranking runs one of two ways, chosen by `deps.enable_factor_scoring`:
+
+* **quality** (default) — largest first, cheaper valuation breaks ties. Legible,
+  and it commits to nothing it cannot defend.
+* **factor** — the five-factor cross-sectional composite in
+  `portfolio/factors.py`, fed by daily history when a `HistoryProvider` is
+  wired. Both paths run through the same quota and the same guardrails; only the
+  sort key differs, which keeps the switch honest — it changes which names are
+  picked, never how many or from where.
 """
 from __future__ import annotations
 
 import time
 
 from wealthwise.agents.state import AdvisoryState, AssetCandidate
+from wealthwise.portfolio.factors import FactorScore, market_cap_100m, score_candidates
 from wealthwise.portfolio.metrics import R_ORDER
 
 # ---------------------------------------------------------------------------
@@ -51,25 +62,6 @@ _MARKET_QUOTA = {"A": 0.6, "HK": 0.2, "US": 0.2}
 _MIN_MARKET_CAP_100M = 100.0
 
 
-def _market_cap_100m(candidate: AssetCandidate) -> float | None:
-    """Market cap in units of 100M local currency, or None if unreported.
-
-    Providers disagree on how to say this: the quote-backed one reports
-    `market_cap_100m` already in 亿, the sample one reports `market_cap_<ccy>` in
-    raw units. Reading only one spelling silently disqualified every candidate
-    from the other provider, which is a screening rule failing on a naming
-    difference rather than on anything about the companies.
-    """
-    direct = candidate.metrics.get("market_cap_100m")
-    if direct is not None:
-        return float(direct)
-    for key in ("market_cap_cny", "market_cap_hkd", "market_cap_usd", "market_cap"):
-        raw = candidate.metrics.get(key)
-        if raw is not None:
-            return float(raw) / 1e8
-    return None
-
-
 def _is_investable(candidate: AssetCandidate) -> bool:
     """Quality floor: reject on evidence of unsuitability, not on missing data.
 
@@ -85,7 +77,7 @@ def _is_investable(candidate: AssetCandidate) -> bool:
     pe = candidate.metrics.get("pe")
     if pe is not None and pe <= 0:
         return False
-    cap = _market_cap_100m(candidate)
+    cap = market_cap_100m(candidate)
     return cap is None or cap >= _MIN_MARKET_CAP_100M
 
 
@@ -93,20 +85,46 @@ def _quality_key(candidate: AssetCandidate) -> tuple:
     """Sort key: larger companies first, ties broken by cheaper valuation.
 
     Size stands in for liquidity and stability, which is what suitability
-    actually cares about — not for expected return. There is deliberately no
-    attempt at a multi-factor score: the fields available here (P/E, P/B, market
-    cap) cannot support one, and a scoring formula that looks quantitative
-    without being validated is worse than an honest, legible rule.
+    actually cares about — not for expected return. This rule commits to nothing
+    it cannot defend from two fields, which is why it remains the default and the
+    fallback: `portfolio/factors.py` ranks on more, but on weights that are a
+    house view rather than a validated one.
 
     Names with no reported size sort last rather than being dropped, so a
     thin-data provider degrades to "quota respected, order arbitrary" instead of
     to an empty book.
     """
-    cap = _market_cap_100m(candidate)
+    cap = market_cap_100m(candidate)
     pe = candidate.metrics.get("pe")
     return (-(cap if cap is not None else 0.0),
             pe if pe is not None else float("inf"),
             candidate.symbol)
+
+
+def _factor_key(scores: dict[str, FactorScore]):
+    """Sort key factory: highest composite first, quality rule breaks ties.
+
+    The quality tuple is kept as the tiebreak rather than the symbol, because
+    every score collapses to 0.0 when a market has one candidate or when no
+    factor had data — and in that case the ranking should degrade to the rule it
+    replaced, not to alphabetical order.
+    """
+    def key(candidate: AssetCandidate) -> tuple:
+        score = scores.get(candidate.symbol)
+        return (-(score.score if score else 0.0), *_quality_key(candidate))
+    return key
+
+
+def _disagreed(candidate: AssetCandidate) -> bool:
+    """True when the consensus layer found the feeds materially at odds on price.
+
+    Only price counts. Two sources quoting different P/E are using different
+    earnings windows, which is a methodology difference; two sources quoting
+    different *prices* for the same instrument means at least one of them is
+    wrong about what it is looking at, and that name should not be sized into an
+    order list on the strength of it.
+    """
+    return "price" in (candidate.metrics.get("data_disagreement") or [])
 
 
 def _allocate_quota(markets: list[str], available: dict[str, int],
@@ -135,8 +153,8 @@ def _allocate_quota(markets: list[str], available: dict[str, int],
     return quota
 
 
-def _select(candidates: list[AssetCandidate], markets: list[str],
-            budget: int) -> list[AssetCandidate]:
+def _select(candidates: list[AssetCandidate], markets: list[str], budget: int,
+            factor_scoring: bool = False) -> tuple[list[AssetCandidate], dict]:
     """Pick the best `budget` names, respecting the geographic split.
 
     Candidates from a market that was never screened are passed through untouched
@@ -146,6 +164,9 @@ def _select(candidates: list[AssetCandidate], markets: list[str],
     would keep the portfolio clean while destroying the pipeline's ability to
     notice, turning an unauthorised cross-border holding into a silent omission
     instead of the REJECT it is supposed to trigger.
+
+    Returns the selection plus a ranking record for the trace: which rule ran,
+    and the factor scores behind the names that made it.
     """
     by_market: dict[str, list[AssetCandidate]] = {m: [] for m in markets}
     unscreened: list[AssetCandidate] = []
@@ -154,14 +175,37 @@ def _select(candidates: list[AssetCandidate], markets: list[str],
             unscreened.append(c)
         elif _is_investable(c):
             by_market[c.market].append(c)
-    for market in by_market:
-        by_market[market].sort(key=_quality_key)
+
+    # Scored per market, never pooled: the z-scores are relative to the list they
+    # are computed over, so pooling would rank markets against each other and
+    # quietly duplicate the job _MARKET_QUOTA already does explicitly.
+    scores: dict[str, FactorScore] = {}
+    for market, members in by_market.items():
+        if factor_scoring:
+            scores.update(score_candidates(members))
+        members.sort(key=_factor_key(scores) if factor_scoring else _quality_key)
 
     quota = _allocate_quota(markets, {m: len(v) for m, v in by_market.items()}, budget)
     selected: list[AssetCandidate] = []
     for market in markets:
         selected.extend(by_market[market][:quota[market]])
-    return selected + unscreened
+
+    ranking = {"method": "factor" if factor_scoring else "quality"}
+    if factor_scoring:
+        # Selection order, not a global leaderboard. Scores are z-scores within
+        # one market, so ranking an A-share against a US name by score would
+        # compare two numbers that were never on the same scale — the exact
+        # mistake per-market scoring exists to avoid.
+        ranking["top"] = [
+            {"symbol": c.symbol, "market": c.market,
+             "score": scores[c.symbol].score, "z": scores[c.symbol].z}
+            for c in selected[:5] if c.symbol in scores
+        ]
+        ranking["thin_evidence"] = sorted(
+            s.symbol for s in scores.values() if s.thin and s.symbol in
+            {c.symbol for c in selected}
+        )
+    return selected + unscreened, ranking
 
 
 def equity_node(state: AdvisoryState, deps) -> dict:
@@ -225,10 +269,28 @@ def equity_node(state: AdvisoryState, deps) -> dict:
     # Filter by risk ceiling
     within_ceiling = [c for c in candidates if R_ORDER.get(c.r_level, 5) <= ceiling_order]
 
+    # Data-quality gate. A name whose two feeds disagree on price is excluded
+    # from selection but counted in the trace: the count is the observable that
+    # tells you a feed has drifted, and silently dropping the names would hide
+    # exactly the signal the consensus layer exists to produce.
+    drop_disagreed = getattr(deps, "drop_on_data_disagreement", True) if deps else False
+    disagreed = [c for c in within_ceiling if _disagreed(c)]
+    rankable = [c for c in within_ceiling if not _disagreed(c)] if drop_disagreed \
+        else within_ceiling
+
+    # Momentum and realized volatility are not in any spot quote, so the factor
+    # path fetches history first. Only for the names still in contention — this
+    # is one request per symbol, and enriching everything screened would pay for
+    # hundreds of names the quota was never going to reach.
+    factor_scoring = bool(getattr(deps, "enable_factor_scoring", False)) if deps else False
+    history = getattr(deps, "history", None) if deps else None
+    if factor_scoring and history is not None and rankable:
+        rankable = history.enrich(rankable)
+
     # Conservative mode keeps a smaller book, but still one built by choosing
     # rather than by truncating a list.
     budget = _MAX_CANDIDATES_CONSERVATIVE if conservative_mode else _EQUITY_BUDGET
-    eligible = _select(within_ceiling, markets, budget)
+    eligible, ranking = _select(rankable, markets, budget, factor_scoring)
 
     event = {
         "node": "equity",
@@ -241,6 +303,8 @@ def equity_node(state: AdvisoryState, deps) -> dict:
         "total_screened": len(candidates),
         "within_ceiling": len(within_ceiling),
         "eligible": len(eligible),
+        "ranking": ranking,
+        "data_disagreement": [c.symbol for c in disagreed],
         # The geographic mix is the point of the selection step, so it belongs in
         # the trace rather than only in the resulting weights.
         "selected_by_market": {
@@ -250,10 +314,13 @@ def equity_node(state: AdvisoryState, deps) -> dict:
     by_market = ", ".join(
         f"{m}:{sum(1 for c in eligible if c.market == m)}" for m in markets
     )
+    dropped = (f"; dropped {len(disagreed)} on source disagreement"
+               if drop_disagreed and disagreed else "")
     note = (
         f"equity_node: screened {len(candidates)} candidates across {markets}; "
         f"{len(within_ceiling)} within {risk_ceiling} ceiling; "
-        f"selected {len(eligible)} by quota ({by_market}); macro_tilt={tilt}; "
+        f"selected {len(eligible)} by quota ({by_market}) ranked by "
+        f"{ranking['method']}{dropped}; macro_tilt={tilt}; "
         f"conservative_mode={conservative_mode}; pe_cap={pe_cap}"
     )
 

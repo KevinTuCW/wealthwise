@@ -119,11 +119,17 @@ def _build_experts_panel(state: AdvisoryState) -> dict:
             node_latencies[node] = round(ts - prev_ts, 3)
         prev_ts = ts
 
+    ranking = _build_ranking(state)
+
     return {
         "macro": macro_summary,
         "equity": {
             "candidate_count": equity_count,
             "top_candidates": equity_top,
+            # Which rule picked these names. Two selections of the same size are
+            # not the same result, and the dashboard should not present them as
+            # though they were.
+            "ranking": ranking,
         },
         "fixed_income": {
             "candidate_count": fi_count,
@@ -133,6 +139,63 @@ def _build_experts_panel(state: AdvisoryState) -> dict:
         "compliance": comp_summary,
         "node_latencies": node_latencies,
     }
+
+
+def _build_consensus_rows(state: AdvisoryState) -> list[dict]:
+    """One row per reconciled macro signal: value, publishers, agreement.
+
+    This is pillar one made visible. The panel used to show jury agreement only,
+    which meant the half of the cross-check that reconciles *data* had no
+    representation anywhere in the UI — including when its publishers disagreed.
+    """
+    consensus = (state.macro_view or {}).get("signal_consensus") or {}
+    rows: list[dict] = []
+    for signal, record in consensus.items():
+        rows.append({
+            "signal": signal,
+            "value": record.get("value"),
+            "confidence": record.get("confidence"),
+            "disagreement": record.get("disagreement", False),
+            "sources": record.get("sources", []),
+            "readings": record.get("readings", {}),
+        })
+    # Contested signals first, then weakest corroboration — the rows someone
+    # needs to look at should not be somewhere in the middle of an alphabetical
+    # list.
+    rows.sort(key=lambda r: (not r["disagreement"], r["confidence"] or 0.0))
+    return rows
+
+
+def _build_market_data_quality(state: AdvisoryState) -> dict:
+    """How the per-symbol quote cross-check went, from the equity node's trace."""
+    event = next(
+        (e for e in reversed(state.trace_events) if e.get("node") == "equity"), None
+    )
+    disputed = list(event.get("data_disagreement", [])) if event else []
+
+    candidates = list(state.equity_candidates) + list(state.fixedincome_candidates)
+    cross_checked = sum(
+        1 for c in candidates if len(c.metrics.get("consensus", {}).get(
+            "price", {}).get("sources", [])) > 1
+    )
+    confidences = [
+        c.metrics["data_confidence"] for c in candidates
+        if c.metrics.get("data_confidence") is not None
+    ]
+    return {
+        "candidates": len(candidates),
+        "cross_checked": cross_checked,
+        "disputed": disputed,
+        "min_confidence": round(min(confidences), 4) if confidences else None,
+    }
+
+
+def _build_ranking(state: AdvisoryState) -> dict:
+    """Which ranking rule ran, and the factor scores behind the top names."""
+    event = next(
+        (e for e in reversed(state.trace_events) if e.get("node") == "equity"), None
+    )
+    return dict(event.get("ranking") or {"method": "quality"}) if event else {}
 
 
 def _build_crosscheck_panel(state: AdvisoryState) -> dict:
@@ -169,6 +232,10 @@ def _build_crosscheck_panel(state: AdvisoryState) -> dict:
         if ev.get("status") in {"BUDGET_EXCEEDED", "GUARDRAIL_BLOCKED"}:
             escalation_signals.append(ev["status"])
 
+    contested = list(macro.get("contested_signals") or [])
+    if contested:
+        escalation_signals.append(f"data:contested({','.join(contested)})")
+
     return {
         "macro_tilt": macro_tilt,
         "macro_confidence": macro_confidence,
@@ -177,6 +244,15 @@ def _build_crosscheck_panel(state: AdvisoryState) -> dict:
         "escalation_signals": escalation_signals,
         "jury_event_count": len(jury_events),
         "compliance_event_count": len(compliance_events),
+        # --- pillar one: multi-source consensus ---
+        # Kept separate from `macro_confidence`, which is the jury's. The two
+        # answer different questions and a single blended number would hide
+        # which one had gone soft.
+        "data_confidence": macro.get("data_confidence"),
+        "data_sources": list(macro.get("sources") or []),
+        "consensus_signals": _build_consensus_rows(state),
+        "contested_signals": contested,
+        "market_data_quality": _build_market_data_quality(state),
     }
 
 

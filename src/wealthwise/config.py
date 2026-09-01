@@ -52,6 +52,18 @@ class Settings(BaseSettings):
     use_real_providers: bool = False          # offline sample stack unless keys + this are set
     sample_data_dir: str = "data/samples"
 
+    # --- equity ranking ---
+    # Multi-factor scoring (value / momentum / low-vol / size / liquidity, see
+    # portfolio/factors.py). Off by default, and the default is the honest one:
+    # the weights are a house view rather than a backtested result, so the
+    # legible "biggest first, cheapest breaks ties" rule stays the shipping
+    # default until someone has validated the model on this universe.
+    enable_factor_scoring: bool = False
+    # Names whose price two feeds disagree on beyond the consensus tolerance are
+    # dropped from selection rather than ranked. Set false to keep them (they
+    # stay tagged either way, so the disagreement is never invisible).
+    drop_on_data_disagreement: bool = True
+
     # --- observability (Langfuse — leave empty keys to run offline / no-op) ---
     enable_langfuse_tracing: bool = False
     langfuse_public_key: str = ""

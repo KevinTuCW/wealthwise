@@ -22,6 +22,8 @@ class SampleMarketProvider:
     Symbol lookups use casefold so tests and live usage are case-insensitive.
     """
 
+    name = "sample"
+
     def __init__(self, data_dir: str | None = None) -> None:
         from wealthwise.config import get_settings
         base = Path(data_dir) if data_dir else Path(get_settings().sample_data_dir)
@@ -62,6 +64,8 @@ class SampleMarketProvider:
 
 class SampleMacroProvider:
     """Offline macro provider backed by macro.json."""
+
+    name = "sample"
 
     def __init__(self, data_dir: str | None = None) -> None:
         from wealthwise.config import get_settings

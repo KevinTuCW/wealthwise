@@ -207,43 +207,144 @@ class AkShareFundProvider:
 # Macro provider
 # ---------------------------------------------------------------------------
 
-class AkShareMacroProvider:
-    """Live macro data via AkShare (lazy-imported)."""
+def _percent(value: object) -> float | None:
+    """Turn a published percentage (3.45) into a decimal fraction (0.0345)."""
+    if value is None:
+        return None
+    try:
+        return float(value) / 100.0
+    except (TypeError, ValueError):
+        return None
+
+
+class _AkShareMacroSource:
+    """One AkShare macro endpoint, published as a partial snapshot.
+
+    Macro consensus needs *sources*, not one provider that happens to call
+    several endpoints internally: a snapshot assembled behind a single interface
+    cannot be cross-checked, because by the time it is returned the individual
+    publishers have already been collapsed into one dict. Splitting endpoint by
+    endpoint is what lets `ConsensusMacroProvider` see two independent CPI
+    readings and report the spread between them.
+
+    Subclasses implement `_get()`, the only method that touches akshare, so
+    tests can stub it without importing akshare.
+    """
+
+    name = "akshare"
+    #: akshare callables tried in order; the first one present is used.
+    functions: tuple[str, ...] = ()
+
+    def _table(self) -> list[dict]:
+        """Return the endpoint's rows, or [] when the function is unavailable."""
+        import akshare as ak  # lazy — never imported at module top
+
+        for fn_name in self.functions:
+            fn = getattr(ak, fn_name, None)
+            if fn is not None:
+                return _to_records(fn())
+        return []
 
     def _get(self) -> dict:
-        """Fetch a macro snapshot (rate + CPI) from AkShare, as a flat dict."""
-        import akshare as ak  # lazy
+        raise NotImplementedError
 
+    def snapshot(self) -> dict:
+        return self._get()
+
+
+class AkShareLprSource(_AkShareMacroSource):
+    """Benchmark lending rate from the LPR table (verified live: TRADE_DATE/LPR1Y)."""
+
+    name = "akshare-lpr"
+    functions = ("macro_china_lpr",)
+
+    def _get(self) -> dict:
+        rows = self._table()
+        if not rows:
+            return {}
+        last = rows[-1]
+        rate = _percent(last.get("LPR1Y") or last.get("1年") or last.get("lpr_1y"))
+        return {"interest_rate": rate} if rate is not None else {}
+
+
+class AkShareCpiYearlySource(_AkShareMacroSource):
+    """CPI year-on-year as republished by the market-data aggregator table."""
+
+    name = "akshare-cpi-yearly"
+    functions = ("macro_china_cpi_yearly",)
+
+    def _get(self) -> dict:
+        rows = self._table()
+        if not rows:
+            return {}
+        last = rows[-1]
+        # TODO(live-calibration): verify akshare column names against live output
+        cpi = _percent(last.get("今值") or last.get("value") or last.get("cpi"))
+        return {"cpi": cpi} if cpi is not None else {}
+
+
+class AkShareCpiNbsSource(_AkShareMacroSource):
+    """CPI year-on-year straight from the statistics-bureau index table.
+
+    Deliberately a different publisher from `AkShareCpiYearlySource` rather than
+    a different column of the same one. Two readings drawn from a single table
+    would agree by construction, and a consensus that cannot disagree is
+    decoration.
+    """
+
+    name = "akshare-cpi-nbs"
+    functions = ("macro_china_cpi",)
+
+    def _get(self) -> dict:
+        rows = self._table()
+        if not rows:
+            return {}
+        last = rows[-1]
+        # TODO(live-calibration): verify akshare column names against live output
+        #   The NBS table quotes the index as "last year = 100", so 102.1 means
+        #   +2.1% YoY; the aggregator table quotes the change itself.
+        raw = last.get("全国-同比增长") or last.get("同比增长") or last.get("全国-当月")
+        cpi = _percent(raw)
+        if cpi is None:
+            return {}
+        if cpi > 0.5:                       # index form (102.1) rather than a rate
+            cpi -= 1.0
+        return {"cpi": cpi}
+
+
+class AkShareMacroProvider:
+    """Live macro data via AkShare — every endpoint merged into one snapshot.
+
+    Kept for callers that want a single macro provider rather than a consensus
+    of sources. `build_macro_sources()` is the entry point the consensus layer
+    uses.
+    """
+
+    name = "akshare"
+
+    def __init__(self, sources: list[_AkShareMacroSource] | None = None) -> None:
+        self._sources = sources if sources is not None else build_macro_sources()
+
+    def _get(self) -> dict:
         snapshot: dict = {}
-
-        # --- benchmark interest rate (LPR) ---
-        # TODO(live-calibration): verify akshare column names against live output
-        rate_fn = getattr(ak, "macro_china_lpr", None)
-        if rate_fn is not None:
-            rate_rows = _to_records(rate_fn())
-            if rate_rows:
-                last = rate_rows[-1]
-                # LPR published in percent (e.g. 3.45) → store as decimal fraction
-                lpr = last.get("LPR1Y") or last.get("1年") or last.get("lpr_1y")
-                if lpr is not None:
-                    snapshot["interest_rate"] = float(lpr) / 100.0
-
-        # --- CPI (YoY) ---
-        # TODO(live-calibration): verify akshare column names against live output
-        cpi_fn = getattr(ak, "macro_china_cpi_yearly", None) or getattr(ak, "macro_china_cpi", None)
-        if cpi_fn is not None:
-            cpi_rows = _to_records(cpi_fn())
-            if cpi_rows:
-                last = cpi_rows[-1]
-                cpi = last.get("今值") or last.get("value") or last.get("cpi")
-                if cpi is not None:
-                    # published in percent (e.g. 2.1) → decimal fraction
-                    snapshot["cpi"] = float(cpi) / 100.0
-
+        for source in self._sources:
+            snapshot.update(source.snapshot())
         return snapshot
 
     def snapshot(self) -> dict:
         return self._get()
+
+
+def build_macro_sources() -> list[_AkShareMacroSource]:
+    """The macro publishers, in the order their readings should be labelled.
+
+    CPI has two independent publishers and is genuinely corroborated. The
+    benchmark rate has one, and the resolver caps it at confidence 0.5 — the
+    right answer, and the reason no second rate endpoint was invented for it:
+    Shibor and LPR measure different things, and medianing them would produce a
+    number that no publisher reports and no borrower pays.
+    """
+    return [AkShareLprSource(), AkShareCpiYearlySource(), AkShareCpiNbsSource()]
 
 
 # ---------------------------------------------------------------------------
