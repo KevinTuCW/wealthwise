@@ -3,696 +3,1480 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>WealthWise Workbench — 金融投顾工作台</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <title>WealthWise 投顾工作台</title>
+  <!--
+    No external stylesheet, no font CDN, no chart library. The whole point of
+    this repo is that a clone runs with no network; the previous revision pulled
+    chart.js from a CDN, so the offline demo silently rendered a blank canvas —
+    the one place a reader looks first. The donut and the bars below are hand-cut
+    SVG, and the type is a deliberately chosen system stack.
+
+    Typography: headings in a CJK serif (宋体 / Source Han Serif). That is the
+    register Chinese financial research is printed in, and it separates
+    "conclusion" from "data" without adding a colour. Numerals are monospaced and
+    tabular throughout — figures in a column have to line up on the decimal or
+    they cannot be compared by eye, which is the only reason to put them in a
+    column.
+  -->
   <style>
     :root {
       color-scheme: light;
-      --bg: #f5f6fa;
-      --panel: #ffffff;
-      --text: #1c2430;
-      --muted: #667085;
-      --border: #d9dee7;
-      --accent: #1e40af;
-      --accent2: #0369a1;
-      --pass: #16a34a;
-      --warn: #b45309;
-      --danger: #b91c1c;
-      --neutral: #374151;
+
+      /* Warm paper rather than blue-grey: this is a document that gets printed,
+         archived and read next to a prospectus, not a SaaS dashboard. */
+      --paper:      #faf9f6;
+      --panel:      #ffffff;
+      --panel-alt:  #f6f5f1;
+
+      --ink:        #16181d;
+      --ink-2:      #4b5563;
+      --ink-3:      #8a8f99;
+
+      --rule:       #e4e1d9;
+      --rule-2:     #cfcbc0;
+
+      --navy:       #12325c;   /* the one structural colour */
+      --navy-2:     #2b5183;
+      --navy-wash:  #eef2f8;
+
+      /* Semantic colours are rationed: they mean verdict or risk, nothing else.
+         A palette where everything is coloured says nothing is important. */
+      --pass:       #1a6b45;
+      --pass-wash:  #e8f3ed;
+      --warn:       #8a5712;
+      --warn-wash:  #fdf3e3;
+      --danger:     #9a2420;
+      --danger-wash:#fbeceb;
+      --gold:       #a8801f;
+
+      --font-serif: "Songti SC", "STSong", "Source Han Serif SC", "Noto Serif CJK SC",
+                    "SimSun", Georgia, "Times New Roman", serif;
+      --font-ui:    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC",
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-num:   ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas,
+                    "Liberation Mono", monospace;
+
+      --shadow: 0 1px 2px rgba(20, 24, 31, .04), 0 1px 12px rgba(20, 24, 31, .03);
+      --bar: 31px;      /* the disclaimer strip everything else sticks below */
+      --rail: 246px;
+      --panel-h: 480px;   /* row height for side-by-side panels */
     }
+
     * { box-sizing: border-box; }
+
     body {
       margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--paper);
+      color: var(--ink);
+      font: 14px/1.6 var(--font-ui);
+      -webkit-font-smoothing: antialiased;
     }
-    header {
-      padding: 16px 24px 12px;
-      border-bottom: 1px solid var(--border);
+
+    /* Every figure on the page is tabular. Set once, here. */
+    .num, table, .stat-v, .mono { font-variant-numeric: tabular-nums; }
+    .mono { font-family: var(--font-num); }
+
+    /* ---------------------------------------------------------------- chrome */
+
+    #disclaimer {
+      position: sticky; top: 0; z-index: 60;
+      background: #2a2723; color: #f0ece3;
+      height: var(--bar); display: flex; align-items: center; justify-content: center;
+      font-size: 12px; letter-spacing: .08em;
+    }
+    #disclaimer b { color: var(--gold); font-weight: 700; }
+
+    /* --------------------------------------------------------------- shell */
+    /* Input and navigation live in a fixed left rail; results occupy the right
+       column as one continuous document. The rail navigates by scrolling, it
+       does not switch views — an advisory proposal whose evidence can be left
+       unopened is one whose evidence nobody reads, and a tabbed version of this
+       page would not print as a single filing. */
+
+    .shell { display: grid; grid-template-columns: var(--rail) 1fr; align-items: start; }
+
+    .rail {
+      position: sticky; top: var(--bar);
+      height: calc(100vh - var(--bar));
+      overflow-y: auto;
       background: var(--panel);
-      position: sticky;
-      top: 0;
-      z-index: 10;
+      border-right: 1px solid var(--rule);
+      display: flex; flex-direction: column;
     }
-    h1 { margin: 0 0 12px; font-size: 20px; font-weight: 700; }
-    .subtitle { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
-    form {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-      gap: 8px 12px;
-      align-items: end;
+    .rail-brand { padding: 16px 18px 14px; border-bottom: 1px solid var(--rule); }
+    .wordmark {
+      font-family: var(--font-serif);
+      font-size: 20px; font-weight: 700; letter-spacing: .04em;
+      color: var(--navy); margin: 0 0 3px;
     }
-    .field { display: flex; flex-direction: column; gap: 3px; }
-    label { font-size: 12px; color: var(--muted); font-weight: 600; }
+    .rail-sub { font-size: 11.5px; color: var(--ink-3); }
+    .rail-h {
+      font-size: 10.5px; font-weight: 700; letter-spacing: .12em;
+      color: var(--ink-3); padding: 14px 18px 8px;
+    }
+
+    /* ------------------------------------------------------------ the form */
+
+    form { padding: 0 0 16px; }
+    /* The form is the tallest thing in the rail and the least useful once a
+       plan exists, so it folds down to one line and hands the height back to
+       the contents list. It never folds on its own before a successful run. */
+    #profile-fold > summary {
+      cursor: pointer; list-style: none;
+      display: flex; align-items: baseline; gap: 8px;
+      white-space: nowrap;      /* label and digest share one line or truncate */
+    }
+    #profile-fold > summary::-webkit-details-marker { display: none; }
+    #profile-fold > summary::after {
+      content: "▾"; margin-left: auto; font-size: 10px; color: var(--ink-3);
+      transition: transform .15s ease;
+    }
+    #profile-fold[open] > summary::after { transform: rotate(180deg); }
+    #profile-fold > summary:hover { background: var(--panel-alt); }
+    #profile-digest {
+      font-family: var(--font-num); font-size: 10.5px; font-weight: 400;
+      letter-spacing: 0; color: var(--ink-2); text-transform: none;
+      min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    }
+    #profile-fold .field, #profile-fold .actions { padding-left: 18px; padding-right: 18px; }
+    form > .actions { padding: 0 18px; }
+    .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; margin-bottom: 11px; }
+    label {
+      font-size: 11px; font-weight: 700; color: var(--ink-2);
+      letter-spacing: .06em;
+    }
+    .hint { font-size: 11px; color: var(--ink-3); line-height: 1.4; }
     input, select {
       height: 34px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 0 10px;
-      font: inherit;
-      background: white;
+      border: 1px solid var(--rule-2);
+      border-radius: 3px;
+      padding: 0 9px;
+      font: 13px var(--font-ui);
+      font-variant-numeric: tabular-nums;
+      background: #fff; color: var(--ink);
     }
-    .form-actions { display: flex; gap: 8px; align-items: flex-end; }
+    input:focus, select:focus {
+      outline: 2px solid var(--navy); outline-offset: -1px; border-color: var(--navy);
+    }
+    .actions { display: flex; gap: 8px; margin-top: 4px; }
+    .actions button { flex: 1; padding: 0 10px; }
     button {
-      height: 34px;
-      border: 0;
-      border-radius: 6px;
-      padding: 0 16px;
-      color: white;
-      background: var(--accent);
-      font-weight: 650;
-      cursor: pointer;
-      white-space: nowrap;
+      height: 34px; padding: 0 16px;
+      border: 1px solid var(--navy); border-radius: 3px;
+      background: var(--navy); color: #fff;
+      font: 700 13px var(--font-ui); letter-spacing: .04em;
+      cursor: pointer; white-space: nowrap;
+      transition: background .12s ease;
     }
-    button:disabled { opacity: 0.55; cursor: default; }
-    #status-bar {
-      font-size: 12px;
-      color: var(--muted);
-      padding: 6px 24px;
-      border-bottom: 1px solid var(--border);
+    button:hover:not(:disabled) { background: var(--navy-2); }
+    button.ghost { background: #fff; color: var(--navy); }
+    button.ghost:hover:not(:disabled) { background: var(--navy-wash); }
+    button:disabled { opacity: .45; cursor: default; }
+
+    /* ------------------------------------------------------------ statusbar */
+    /* A run-state strip, not a navigation bar. The contents list that used to
+       live here competed with the run status for the same row and for the same
+       kind of attention; the tier headings below already say where you are, and
+       they say it in the document rather than above it. */
+
+    .statusbar {
+      position: sticky; top: var(--bar); z-index: 30;
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 24px; min-height: 34px;
       background: var(--panel);
-      min-height: 28px;
+      border-bottom: 1px solid var(--rule);
+      font-family: var(--font-num); font-size: 11.5px; color: var(--ink-2);
     }
+    .statusbar .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); flex: none; }
+    .statusbar.running .dot { background: var(--gold); animation: pulse 1.1s infinite; }
+    .statusbar.ok      .dot { background: var(--pass); }
+    .statusbar.err     .dot { background: var(--danger); }
+    @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
+
+    .run-meta {
+      margin-left: auto; display: flex; gap: 18px; flex: none;
+      color: var(--ink-3); white-space: nowrap;
+    }
+    .run-meta b { color: var(--ink-2); font-weight: 600; }
+
+    /* --------------------------------------------------------------- tiers */
+    /* Three bands, in reading order: what the answer is, why it holds, what the
+       run cost. Seven equally-weighted panels is what made the page feel flat. */
+
+    .tier {
+      grid-column: 1 / -1;
+      display: flex; align-items: baseline; gap: 12px;
+      margin: 12px 0 -4px;
+      padding-bottom: 7px;
+      border-bottom: 1.5px solid var(--rule-2);
+    }
+    .tier:first-child { margin-top: 0; }
+    .tier-n {
+      font-family: var(--font-serif); font-size: 17px; font-weight: 700;
+      color: var(--navy); letter-spacing: .06em;
+    }
+    .tier-t { font-family: var(--font-serif); font-size: 15px; font-weight: 700; letter-spacing: .04em; }
+    .tier-d { font-size: 11.5px; color: var(--ink-3); margin-left: auto; text-align: right; }
+
+    /* --------------------------------------------------------------- verdict */
+    /* The one thing a reader must not have to hunt for: was this issued, and
+       does it match the investor. Everything else on the page supports it. */
+
+    .verdict {
+      margin: 18px 24px 0;
+      background: var(--panel);
+      border: 1px solid var(--rule);
+      border-left: 3px solid var(--ink-3);
+      border-radius: 3px;
+      box-shadow: var(--shadow);
+      display: grid;
+      grid-template-columns: minmax(260px, 1.1fr) 2fr;
+      gap: 0;
+    }
+    .verdict.is-pass   { border-left-color: var(--pass); }
+    .verdict.is-warn   { border-left-color: var(--warn); }
+    .verdict.is-reject { border-left-color: var(--danger); }
+    .verdict-main { padding: 16px 20px; border-right: 1px solid var(--rule); }
+    .verdict-eyebrow {
+      font-size: 11px; letter-spacing: .12em; color: var(--ink-3); font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .verdict-headline {
+      font-family: var(--font-serif);
+      font-size: 21px; font-weight: 700; line-height: 1.3; margin-bottom: 6px;
+    }
+    .verdict.is-pass   .verdict-headline { color: var(--pass); }
+    .verdict.is-warn   .verdict-headline { color: var(--warn); }
+    .verdict.is-reject .verdict-headline { color: var(--danger); }
+    .verdict-plain { font-size: 13px; color: var(--ink-2); line-height: 1.65; }
+
+    /* The C→R chain: the single most important fact in a suitability system,
+       drawn rather than stated so it survives a glance. */
+    .cr-chain {
+      display: flex; align-items: center; gap: 10px; margin-top: 12px;
+      font-family: var(--font-num); font-size: 12px;
+    }
+    .cr-node {
+      border: 1px solid var(--rule-2); border-radius: 3px;
+      padding: 4px 10px; background: var(--panel-alt); font-weight: 700;
+    }
+    .cr-node.hi { background: var(--navy); border-color: var(--navy); color: #fff; }
+    .cr-arrow { color: var(--ink-3); }
+    .cr-verdict { font-weight: 700; }
+
+    .verdict-stats {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    }
+    .stat {
+      padding: 14px 18px;
+      border-right: 1px solid var(--rule);
+      border-bottom: 1px solid var(--rule);
+      min-width: 0;
+    }
+    .stat:nth-child(-n+4) { border-bottom: 1px solid var(--rule); }
+    .stat-k {
+      font-size: 11px; color: var(--ink-3); font-weight: 700; letter-spacing: .04em;
+      margin-bottom: 3px; white-space: nowrap;
+    }
+    .stat-v {
+      font-family: var(--font-num); font-size: 19px; font-weight: 600;
+      letter-spacing: -.01em; line-height: 1.2; white-space: nowrap;
+    }
+    .stat-v .ccy { font-size: 11px; font-weight: 600; color: var(--ink-3); margin-left: 4px; }
+    .stat-note { font-size: 11px; color: var(--ink-3); margin-top: 3px; line-height: 1.4; }
+    .stat.flag .stat-v { color: var(--warn); }
+
+    /* ------------------------------------------------------------------ halt */
+
+    #halt {
+      display: none;
+      margin: 18px 24px 0;
+      border: 1px solid var(--danger);
+      border-left: 3px solid var(--danger);
+      border-radius: 3px;
+      background: var(--danger-wash);
+      padding: 14px 20px;
+    }
+    #halt .t {
+      font-family: var(--font-serif); font-size: 16px; font-weight: 700;
+      color: var(--danger); margin-bottom: 5px;
+    }
+    #halt .b { font-size: 13px; color: #7a1d1a; line-height: 1.6; }
+    .dimmed { opacity: .34; pointer-events: none; user-select: none; }
+
+    /* ---------------------------------------------------------------- panels */
+
     main {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 14px;
-      padding: 14px 24px 28px;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 16px;
+      padding: 18px 24px 48px;
+      align-items: stretch;   /* paired panels share a row height */
     }
     section {
+      grid-column: span 6;
       background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      overflow: hidden;
+      border: 1px solid var(--rule);
+      border-radius: 3px;
+      box-shadow: var(--shadow);
+      min-width: 0;
+      display: flex; flex-direction: column;
     }
-    section.wide { grid-column: 1 / -1; }
-    h2 {
+    /* Panels that share a row are bounded and scroll internally rather than
+       letting the longer one drag a column of whitespace along beside it.
+       Full-width panels are never paired, so they keep their natural height —
+       a table you have to scroll inside is worse than one you scroll past. */
+    section:not(.full) { max-height: var(--panel-h); }
+    section:not(.full) > .body { overflow-y: auto; }
+    section.full { grid-column: span 12; }
+    section.third { grid-column: span 4; }
+    section.two-thirds { grid-column: span 8; }
+
+    section > h2 {
       margin: 0;
-      padding: 10px 14px;
-      border-bottom: 1px solid var(--border);
-      font-size: 14px;
-      font-weight: 700;
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      padding: 11px 18px 10px;
+      border-bottom: 1px solid var(--rule);
+      font-family: var(--font-serif);
+      font-size: 15px; font-weight: 700; letter-spacing: .04em;
+      display: flex; align-items: baseline; gap: 10px;
     }
-    .panel-tag {
-      font-size: 11px;
-      font-weight: 700;
-      padding: 2px 7px;
-      border-radius: 999px;
-      color: white;
+    section > h2 .idx {
+      font-family: var(--font-num); font-size: 10.5px; font-weight: 700;
+      letter-spacing: .1em; color: var(--ink-3);
     }
-    .tag-alloc { background: #1e40af; }
-    .tag-experts { background: #7c3aed; }
-    .tag-crosscheck { background: #0369a1; }
-    .tag-compliance { background: #b45309; }
-    .tag-cost { background: #374151; }
-    .body { padding: 12px 14px; }
-    .kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin-bottom: 12px; }
-    .kpi { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
-    .klabel { font-size: 11px; color: var(--muted); margin-bottom: 2px; }
-    .kvalue { font-size: 18px; font-weight: 750; }
-    .chart-wrap { position: relative; height: 220px; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th { padding: 7px 8px; border-bottom: 2px solid var(--border); text-align: left; color: var(--muted); font-size: 11px; font-weight: 700; }
-    td { padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
-    tr:last-child td { border-bottom: none; }
-    .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 12px; font-weight: 700; }
-    .pill-pass { background: #d1fae5; color: #065f46; }
-    .pill-downgrade { background: #fef3c7; color: #92400e; }
-    .pill-reject { background: #fee2e2; color: #991b1b; }
-    .pill-suitable { background: #e0f2fe; color: #0c4a6e; }
-    .pill-over { background: #fef9c3; color: #713f12; }
-    .pill-self { outline: 2px solid var(--accent); }
-    .check-present::before { content: "✓"; color: var(--pass); font-weight: 700; margin-right: 5px; }
-    .check-missing::before { content: "✗"; color: var(--danger); font-weight: 700; margin-right: 5px; }
-    .node-log { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
-    .node-entry { padding: 3px 0; border-bottom: 1px solid var(--border); }
-    .node-entry:last-child { border: none; }
-    .node-name { font-weight: 700; color: var(--accent2); }
-    pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
-    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .expert-card { border: 1px solid var(--border); border-radius: 6px; padding: 10px; }
-    .expert-card h3 { margin: 0 0 8px; font-size: 13px; color: var(--accent); }
-    .kv-row { display: flex; gap: 6px; margin-bottom: 3px; font-size: 12px; }
-    /* Execution panel: the order list is the part someone acts on, so it gets
-       room to breathe and right-aligned numerics that scan down a column. */
-    .exec-table { margin-top: 10px; }
-    .exec-table td.num, .exec-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
-    .exec-table tbody tr:hover { background: #f8fafc; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
-    .muted { color: var(--muted); font-size: 13px; }
-    .guidance { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--border);
-                border-radius: 6px; background: #f8fafc; }
-    .guidance .kv-row { align-items: flex-start; font-size: 12.5px; margin-bottom: 6px; }
-    .guidance .kv-k { min-width: 62px; font-weight: 700; color: var(--muted); }
-    .guidance ul { margin: 0; padding-left: 16px; }
-    .dropped { margin-top: 10px; font-size: 12px; color: var(--muted); }
-    .dropped summary { cursor: pointer; }
-    .dropped ul { margin: 6px 0 0; padding-left: 18px; }
-    .kv-k { color: var(--muted); min-width: 90px; }
-    #advisory-halt {
-      display: none;
-      grid-column: 1 / -1;
-      border: 2px solid var(--danger);
-      border-radius: 8px;
-      background: #fff1f2;
-      padding: 14px 18px;
-      margin-bottom: 0;
+    section > h2 .h2-note {
+      margin-left: auto; font-family: var(--font-ui); font-size: 11.5px;
+      font-weight: 400; color: var(--ink-3); letter-spacing: 0;
     }
-    #advisory-halt .halt-title {
-      font-size: 15px; font-weight: 700; color: var(--danger); margin-bottom: 6px;
+    .body { padding: 16px 18px; }
+
+    h3 {
+      margin: 18px 0 8px;
+      font-size: 11.5px; font-weight: 700; letter-spacing: .08em;
+      color: var(--ink-2); text-transform: none;
+      padding-bottom: 5px; border-bottom: 1px solid var(--rule);
     }
-    #advisory-halt .halt-body { font-size: 13px; color: #7f1d1d; }
-    .panel-dimmed { opacity: 0.35; pointer-events: none; user-select: none; }
-    @media (max-width: 860px) {
-      main { grid-template-columns: 1fr; padding: 10px; }
-      header { padding: 12px; }
-      form { grid-template-columns: 1fr 1fr; }
+    h3:first-child { margin-top: 0; }
+
+    /* ------------------------------------------------------------- glossary */
+    /* Every piece of jargon on this page carries its own definition. A term the
+       reader has to leave the page to look up is a term they will guess at. */
+
+    .term {
+      border-bottom: 1px dotted var(--ink-3);
+      cursor: help; position: relative;
+      color: inherit;
+    }
+    .term::after {
+      content: "ⓘ"; font-size: 9.5px; color: var(--ink-3);
+      vertical-align: super; margin-left: 1px; font-family: var(--font-ui);
+    }
+    .term:focus { outline: 2px solid var(--navy); outline-offset: 2px; }
+    .tip {
+      position: absolute; left: 0; bottom: calc(100% + 8px);
+      width: 268px; z-index: 30;
+      background: #22262d; color: #f2f1ee;
+      border-radius: 4px; padding: 9px 11px;
+      font: 400 12px/1.6 var(--font-ui);
+      letter-spacing: 0; text-align: left;
+      box-shadow: 0 6px 20px rgba(20,24,31,.22);
+      opacity: 0; visibility: hidden;
+      transform: translateY(3px);
+      transition: opacity .13s ease, transform .13s ease, visibility .13s;
+      pointer-events: none;
+    }
+    .tip::after {
+      content: ""; position: absolute; top: 100%; left: 14px;
+      border: 6px solid transparent; border-top-color: #22262d;
+    }
+    /* The term itself is the tooltip's title line, not a run-in bold. */
+    .tip b { display: block; color: var(--gold); font-weight: 700; margin-bottom: 3px;
+             letter-spacing: .02em; }
+    .tip b + br { display: none; }
+    .term:hover .tip, .term:focus .tip { opacity: 1; visibility: visible; transform: translateY(0); }
+    /* Near the right edge the popover would run off the panel. */
+    .term.tip-right .tip { left: auto; right: 0; }
+    .term.tip-right .tip::after { left: auto; right: 14px; }
+
+    /* ---------------------------------------------------------------- tables */
+
+    table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    thead th {
+      padding: 6px 8px;
+      border-bottom: 1.5px solid var(--rule-2);
+      text-align: left; vertical-align: bottom;
+      font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
+      color: var(--ink-3); white-space: nowrap;
+    }
+    tbody td { padding: 7px 8px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr:hover { background: var(--panel-alt); }
+    td.num, th.num { text-align: right; font-family: var(--font-num); white-space: nowrap; }
+    td.sym { font-family: var(--font-num); color: var(--ink-2); }
+    .table-scroll { overflow-x: auto; }
+
+    /* ----------------------------------------------------------------- bits */
+
+    .pill {
+      display: inline-block; border-radius: 3px; padding: 2px 8px;
+      font-size: 11.5px; font-weight: 700; letter-spacing: .03em;
+      font-family: var(--font-num);
+    }
+    .pill-pass   { background: var(--pass-wash);   color: var(--pass); }
+    .pill-warn   { background: var(--warn-wash);   color: var(--warn); }
+    .pill-reject { background: var(--danger-wash); color: var(--danger); }
+    .pill-mute   { background: var(--panel-alt);   color: var(--ink-2); }
+    .pill-navy   { background: var(--navy-wash);   color: var(--navy); }
+
+    .kv { display: flex; gap: 10px; padding: 4px 0; font-size: 12.5px; align-items: baseline; }
+    .kv .k { color: var(--ink-3); min-width: 84px; flex: none; }
+    .kv .v { color: var(--ink); min-width: 0; }
+
+    .plain {
+      margin-top: 6px; padding: 8px 11px;
+      background: var(--navy-wash); border-left: 2px solid var(--navy-2);
+      border-radius: 0 3px 3px 0;
+      font-size: 12px; line-height: 1.65; color: var(--ink-2);
+    }
+    .plain b { color: var(--navy); font-weight: 700; }
+
+    .empty { color: var(--ink-3); font-size: 12.5px; padding: 6px 0; }
+
+    /* Weight bars: a column of aligned bars is read faster than a pie, and it
+       keeps the exact number next to its own bar. */
+    .bars { display: flex; flex-direction: column; gap: 7px; }
+    .bar-row { display: grid; grid-template-columns: 62px 1fr 62px; gap: 10px; align-items: center; }
+    .bar-k { font-size: 12px; color: var(--ink-2); }
+    .bar-track { height: 12px; background: var(--panel-alt); border-radius: 2px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 2px; }
+    .bar-v { font-family: var(--font-num); font-size: 12px; text-align: right; }
+
+    .alloc-split { display: grid; grid-template-columns: 172px 1fr; gap: 20px; align-items: center; }
+    @media (max-width: 620px) { .alloc-split { grid-template-columns: 1fr; } }
+
+    .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 1px;
+                   background: var(--rule); border: 1px solid var(--rule); border-radius: 3px; }
+    .metric { background: var(--panel); padding: 9px 11px; }
+    .metric .k { font-size: 11px; color: var(--ink-3); margin-bottom: 2px; }
+    .metric .v { font-family: var(--font-num); font-size: 15px; font-weight: 600; }
+
+    /* Expert cards */
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+    .card { border: 1px solid var(--rule); border-radius: 3px; padding: 11px 13px; }
+    .card h4 {
+      margin: 0 0 8px; font-family: var(--font-serif);
+      font-size: 13.5px; font-weight: 700; color: var(--navy);
+      display: flex; align-items: baseline; gap: 7px;
+    }
+    .card h4 .role { font-family: var(--font-num); font-size: 10px; color: var(--ink-3); letter-spacing: .08em; }
+
+    .zrow { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; font-size: 12px; }
+    .zbadge {
+      font-family: var(--font-num); font-size: 10.5px;
+      padding: 1px 5px; border-radius: 2px; background: var(--panel-alt); color: var(--ink-2);
+    }
+    .zbadge.pos { background: var(--pass-wash); color: var(--pass); }
+    .zbadge.neg { background: var(--danger-wash); color: var(--danger); }
+
+    /* Disclosure checklist */
+    .check { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; font-size: 12.5px; }
+    .check .mark { font-family: var(--font-num); font-weight: 700; flex: none; }
+    .check.on  .mark { color: var(--pass); }
+    .check.off .mark { color: var(--danger); }
+    .check.off { color: var(--danger); }
+
+    /* C×R matrix */
+    .matrix td, .matrix th { text-align: center; padding: 5px 4px; font-size: 11.5px; }
+    .matrix th:first-child, .matrix td:first-child { text-align: left; white-space: nowrap; }
+    .cell { display: block; border-radius: 2px; padding: 3px 0; font-family: var(--font-num); font-size: 10.5px; }
+    .cell.ok  { background: var(--pass-wash);  color: var(--pass); }
+    .cell.no  { background: var(--panel-alt);  color: var(--ink-3); }
+    .cell.here { outline: 2px solid var(--navy); outline-offset: -2px; font-weight: 700; }
+
+    /* Explanation panel — the plain-language plan, previously in the payload
+       and never rendered anywhere. It is the only part a novice can read start
+       to finish, so it gets a document setting rather than a data setting. */
+    .doc {
+      font-size: 13px; line-height: 1.85; color: var(--ink-2);
+      padding-right: 6px;
+    }
+    .doc p { margin: 0 0 10px; }
+    .doc .doc-h {
+      font-family: var(--font-serif); font-weight: 700; color: var(--ink);
+      margin: 14px 0 6px;
+    }
+    .doc .doc-li {
+      font-family: var(--font-num); font-size: 12px;
+      padding: 2px 0 2px 12px; border-left: 2px solid var(--rule);
+      color: var(--ink-2);
+    }
+
+    /* Pipeline timeline */
+    .timeline { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; }
+    .tl-row { display: grid; grid-template-columns: 132px 1fr 58px; gap: 9px; align-items: center; }
+    .tl-n { font-family: var(--font-num); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; }
+    .tl-track { height: 9px; background: var(--panel-alt); border-radius: 2px; }
+    .tl-fill { height: 100%; background: var(--navy-2); border-radius: 2px; min-width: 2px; }
+    .tl-v { font-family: var(--font-num); text-align: right; color: var(--ink-2); }
+    .tl-live .tl-fill { background: var(--gold); animation: pulse 1.1s infinite; }
+
+    details { margin-top: 10px; font-size: 12px; }
+    details summary { cursor: pointer; color: var(--navy); font-weight: 600; }
+    details ul { margin: 7px 0 0; padding-left: 18px; color: var(--ink-2); line-height: 1.7; }
+
+    .note {
+      margin-top: 10px; padding: 7px 11px;
+      background: var(--warn-wash); border-left: 2px solid var(--gold);
+      font-size: 12px; color: var(--warn); border-radius: 0 3px 3px 0;
+    }
+
+    /* --------------------------------------------------------------- layout */
+
+    @media (max-width: 1400px) {
+      section.third { grid-column: span 5; }
+      section.two-thirds { grid-column: span 7; }
+    }
+    @media (max-width: 1120px) {
+      /* Below this the rail costs more width than it earns: it unsticks, the
+         form goes back to a horizontal grid and the toc becomes a chip row. */
+      .shell { display: block; }
+      .rail {
+        position: static; height: auto; overflow: visible;
+        border-right: none; border-bottom: 1px solid var(--rule);
+      }
+      form {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 0 16px; align-items: end;
+      }
+      .statusbar { flex-wrap: wrap; }
+      .run-meta { margin-left: 0; width: 100%; gap: 14px; }
+      section, section.third, section.two-thirds { grid-column: span 12; }
+      .verdict { grid-template-columns: 1fr; }
+      .verdict-main { border-right: none; border-bottom: 1px solid var(--rule); }
+      .tier-d { display: none; }
+    }
+    @media (max-width: 720px) {
+      main, .rail-brand, form, .statusbar { padding-left: 14px; padding-right: 14px; }
+      .verdict, #halt { margin-left: 14px; margin-right: 14px; }
+      main { gap: 12px; }
+    }
+
+    /* ---------------------------------------------------------------- print */
+    /* An advisory proposal gets printed and filed. Controls disappear, colour
+       becomes structure, and nothing is cut off mid-panel. */
+    @media print {
+      body { background: #fff; }
+      #disclaimer { position: static; background: #fff; color: #000; border-bottom: 2px solid #000; }
+      form, .actions, .h2-note { display: none !important; }
+      .statusbar { position: static; border-bottom: none; }
+      .shell { display: block; }
+      .rail { position: static; height: auto; border: none; }
+      .tier { break-after: avoid; }
+      main { display: block; padding: 0 12mm; }
+      section { break-inside: avoid; box-shadow: none; margin-bottom: 8mm; }
+      .verdict { margin: 6mm 12mm 0; box-shadow: none; break-inside: avoid; }
+      .doc { max-height: none; overflow: visible; }
+      section:not(.full) { max-height: none; }
+      section:not(.full) > .body { overflow: visible; }
+      .tip { display: none; }
+      .term::after { content: ""; }
     }
   </style>
 </head>
 <body>
-  <div id="demo-disclaimer" style="
-    position: sticky; top: 0; z-index: 20;
-    background: #fef3c7; border-bottom: 1px solid #fbbf24;
-    padding: 6px 24px; font-size: 12px; font-weight: 600; color: #92400e;
-    text-align: center; letter-spacing: 0.03em;">
-    仅供学习演示 · 非投资建议 · 非真实合规系统
-  </div>
-  <header>
-    <h1>WealthWise Workbench <span style="font-weight:400;font-size:14px;color:var(--muted)">金融投顾多 Agent 工作台</span></h1>
+  <div id="disclaimer"><b>仅供学习演示</b> · 非投资建议 · 非真实合规系统 · 数据与规则均为合成或改写</div>
+
+  <div class="shell">
+  <aside class="rail">
+    <div class="rail-brand">
+      <h1 class="wordmark">WealthWise</h1>
+      <div class="rail-sub">投顾工作台 · Supervisor + 5 专家</div>
+    </div>
+
     <form id="run-form">
+      <details id="profile-fold" open>
+        <summary class="rail-h">投资者画像<span id="profile-digest"></span></summary>
       <div class="field">
-        <label for="risk_level">风险等级</label>
+        <label for="risk_level">风险测评等级</label>
         <select id="risk_level" name="risk_level">
-          <option>C1</option><option>C2</option><option selected>C3</option>
-          <option>C4</option><option>C5</option>
+          <option value="C1">C1 保守型</option>
+          <option value="C2">C2 稳健型</option>
+          <option value="C3" selected>C3 平衡型</option>
+          <option value="C4">C4 成长型</option>
+          <option value="C5">C5 进取型</option>
         </select>
+        <span class="hint">证券公司风险测评的结果</span>
       </div>
       <div class="field">
-        <label for="investable">可投资金额 (CNY)</label>
+        <label for="investable">可投资金额</label>
         <input id="investable" name="investable" type="number" value="500000" min="1000">
+        <span class="hint">人民币，闲置 3 年以上的钱</span>
       </div>
       <div class="field">
-        <label for="horizon_years">投资期限 (年)</label>
+        <label for="horizon_years">投资期限</label>
         <input id="horizon_years" name="horizon_years" type="number" value="5" min="1" max="30">
+        <span class="hint">年；期限越长越能承受波动</span>
       </div>
       <div class="field">
         <label for="goals">投资目标</label>
         <input id="goals" name="goals" value="balanced_growth" placeholder="逗号分隔">
+        <span class="hint">retirement / balanced_growth …</span>
       </div>
       <div class="field">
-        <label for="liquidity_min">最低流动性要求</label>
+        <label for="liquidity_min">最低流动性</label>
         <input id="liquidity_min" name="liquidity_min" type="number" value="0.2" step="0.05" min="0" max="1">
+        <span class="hint">随时可取用的比例，0.2 = 20%</span>
       </div>
       <div class="field">
         <label for="accept_cross_border">接受跨境投资</label>
         <select id="accept_cross_border" name="accept_cross_border">
-          <option value="true" selected>是</option>
-          <option value="false">否</option>
+          <option value="true" selected>是 · 含港美股</option>
+          <option value="false">否 · 仅 A 股</option>
         </select>
+        <span class="hint">选「否」则不配置外币资产</span>
       </div>
-      <div class="form-actions">
-        <button type="submit" id="run-btn">▶ 运行</button>
-        <button type="button" id="stream-btn">⚡ 流式运行</button>
+      </details>
+      <div class="actions">
+        <button type="submit" id="run-btn">生成方案</button>
+        <button type="button" id="stream-btn" class="ghost">逐节点</button>
       </div>
     </form>
-  </header>
-  <div id="status-bar">就绪 — 填写投资者画像后点击"运行"</div>
-  <main>
-    <div id="advisory-halt">
-      <div class="halt-title">⚠ 本次投顾建议无法出具 — 需要人工审核</div>
-      <div class="halt-body" id="halt-detail"></div>
+
+  </aside>
+
+  <div class="content">
+    <div class="statusbar" id="statusbar">
+      <span class="dot"></span>
+      <span id="status-text">就绪 — 填写左侧画像后生成方案</span>
+      <div class="run-meta">
+        <span>运行编号 <b id="meta-run">—</b></span>
+        <span>出具时间 <b id="meta-time">—</b></span>
+        <span>数据模式 <b id="meta-mode">—</b></span>
+      </div>
     </div>
-    <section id="alloc-section">
-      <h2><span class="panel-tag tag-alloc">ALLOC</span> 资产配置</h2>
-      <div class="body">
-        <div class="kpis" id="alloc-kpis"></div>
-        <div class="chart-wrap"><canvas id="alloc-pie"></canvas></div>
+
+    <div id="halt">
+      <div class="t">本次方案未能出具，需人工复核</div>
+      <div class="b" id="halt-detail"></div>
+    </div>
+
+    <div class="verdict" id="verdict" style="display:none">
+      <div class="verdict-main">
+        <div class="verdict-eyebrow">审核结论</div>
+        <div class="verdict-headline" id="verdict-headline">—</div>
+        <div class="verdict-plain" id="verdict-plain"></div>
+        <div class="cr-chain" id="cr-chain"></div>
       </div>
-    </section>
-    <section>
-      <h2><span class="panel-tag tag-experts">EXPERTS</span> 专家贡献</h2>
-      <div class="body" id="experts-body"></div>
-    </section>
-    <section class="wide" id="exec-section">
-      <h2><span class="panel-tag tag-alloc">ORDER</span> 执行清单</h2>
-      <div class="body">
-        <div class="kpis" id="exec-kpis"></div>
-        <div id="exec-table"></div>
-        <div id="exec-guidance"></div>
-        <div id="exec-dropped"></div>
+      <div class="verdict-stats" id="verdict-stats"></div>
+    </div>
+
+    <main>
+      <div class="tier">
+        <span class="tier-n">一</span><span class="tier-t">结论与执行</span>
+        <span class="tier-d">给投资者的答案：钱怎么分、怎么说、怎么买</span>
       </div>
-    </section>
-    <section>
-      <h2><span class="panel-tag tag-crosscheck">CROSS</span> 交叉验证</h2>
-      <div class="body" id="crosscheck-body"></div>
-    </section>
-    <section>
-      <h2><span class="panel-tag tag-compliance">COMPLY</span> 合规审查</h2>
-      <div class="body" id="compliance-body"></div>
-    </section>
-    <section class="wide">
-      <h2><span class="panel-tag tag-cost">COST</span> 成本与管线</h2>
-      <div class="body">
-        <div class="kpis" id="cost-kpis"></div>
-        <div id="pipeline-log"></div>
-      </div>
-    </section>
-  </main>
-  <script>
-    const byId = (id) => document.getElementById(id);
-    const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-    const fmt = (v, digits = 2) => typeof v === "number" ? v.toFixed(digits) : (v ?? "—");
-    const pct = (v) => typeof v === "number" ? (v * 100).toFixed(1) + "%" : "—";
 
-    let pieChart = null;
-
-    function setStatus(msg) { byId("status-bar").textContent = msg; }
-
-    // ---- Allocation panel ----
-    function renderAlloc(alloc) {
-      const kpis = [
-        { k: "组合风险等级", v: alloc.portfolio_r_level || "—" },
-        { k: "境外敞口", v: pct(alloc.fx_exposure) },
-        { k: "波动率", v: alloc.metrics?.volatility != null ? pct(alloc.metrics.volatility) : "—" },
-        { k: "最大回撤", v: alloc.metrics?.max_drawdown != null ? pct(alloc.metrics.max_drawdown) : "—" },
-        { k: "Sharpe", v: fmt(alloc.metrics?.sharpe) },
-        { k: "分散度", v: fmt(alloc.metrics?.diversification) },
-      ];
-      byId("alloc-kpis").innerHTML = kpis.map(({ k, v }) =>
-        `<div class="kpi"><div class="klabel">${esc(k)}</div><div class="kvalue">${esc(v)}</div></div>`
-      ).join("");
-
-      // Pie: class_weights
-      const cw = alloc.class_weights || {};
-      const cwLabels = Object.keys(cw);
-      const cwValues = cwLabels.map((k) => +(cw[k] * 100).toFixed(1));
-      const colors = ["#1e40af","#0369a1","#6d28d9","#0891b2","#7c3aed","#db2777"];
-      if (pieChart) { pieChart.destroy(); pieChart = null; }
-      const ctx = byId("alloc-pie").getContext("2d");
-      pieChart = new Chart(ctx, {
-        type: "doughnut",
-        data: {
-          labels: cwLabels,
-          datasets: [{ data: cwValues, backgroundColor: colors, borderWidth: 1 }],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { position: "right" } },
-        },
-      });
-    }
-
-    // ---- Execution panel ----
-    function renderExecution(ex) {
-      const positions = ex.positions || [];
-      const money = (v, ccy) => `${(v ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}${ccy ? " " + ccy : ""}`;
-      byId("exec-kpis").innerHTML = [
-        { k: "持仓数", v: ex.position_count ?? 0 },
-        { k: "买入合计", v: money(ex.invested) },
-        { k: "剩余现金", v: money(ex.cash_residual) },
-        { k: "本金", v: money(ex.investable) },
-      ].map(({ k, v }) => `<div class="kpi"><div class="klabel">${esc(k)}</div><div class="kvalue">${esc(String(v))}</div></div>`).join("");
-
-      if (!positions.length) {
-        byId("exec-table").innerHTML = '<p class="muted">本次未生成可执行清单。</p>';
-        byId("exec-guidance").innerHTML = "";
-        byId("exec-dropped").innerHTML = "";
-        return;
-      }
-
-      const rows = positions.map((p) => {
-        // US venues trade single shares; only show 手 where a board lot exists.
-        const qty = p.lot_size > 1
-          ? `${p.lots} 手 / ${p.shares.toLocaleString()} 股`
-          : `${p.shares.toLocaleString()} 股`;
-        return `<tr>
-          <td>${esc(p.name)}</td>
-          <td class="mono">${esc(p.symbol)}</td>
-          <td>${esc(p.market)}</td>
-          <td>${esc(p.asset_class)}</td>
-          <td class="num">${pct(p.weight)}</td>
-          <td class="num">${esc(qty)}</td>
-          <td class="num">${esc(money(p.amount, p.currency))}</td>
-        </tr>`;
-      }).join("");
-      byId("exec-table").innerHTML = `<table class="exec-table">
-        <thead><tr><th>名称</th><th>代码</th><th>市场</th><th>类别</th>
-        <th class="num">权重</th><th class="num">数量</th><th class="num">金额</th></tr></thead>
-        <tbody>${rows}</tbody></table>`;
-
-      const g = ex.guidance || {};
-      const channels = (g.channels || []).map((c) => `<li>${esc(c)}</li>`).join("");
-      byId("exec-guidance").innerHTML = (g.entry || g.rebalance) ? `
-        <div class="guidance">
-          <div class="kv-row"><span class="kv-k">建仓节奏</span><span>${esc(g.entry?.detail || "—")}</span></div>
-          <div class="kv-row"><span class="kv-k">再平衡</span><span>${esc(g.rebalance?.detail || "—")}</span></div>
-          ${channels ? `<div class="kv-row"><span class="kv-k">交易渠道</span><span><ul>${channels}</ul></span></div>` : ""}
-        </div>` : "";
-
-      // Dropped names are shown, not hidden: "one lot of 茅台 costs more than its
-      // entire allocation" is information the investor is entitled to.
-      const dropped = ex.dropped || [];
-      byId("exec-dropped").innerHTML = dropped.length
-        ? `<details class="dropped"><summary>${dropped.length} 个标的未纳入清单（点击查看原因）</summary>
-           <ul>${dropped.map((d) => `<li class="mono">${esc(d)}</li>`).join("")}</ul></details>`
-        : "";
-    }
-
-    // ---- Experts panel ----
-    // The composite alone is not reviewable — "0.83" says nothing about whether
-    // the name was picked for being cheap or for being calm. The per-factor
-    // z-scores are what make the ranking arguable.
-    const FACTOR_LABELS = {
-      value: "价值", momentum: "动量", low_vol: "低波",
-      size: "规模", liquidity: "流动性",
-    };
-
-    function factorRows(ranking) {
-      const top = ranking?.top || [];
-      if (!top.length) return "";
-      const rows = top.map((t) => {
-        const z = Object.entries(t.z || {})
-          .map(([k, v]) => `${FACTOR_LABELS[k] || k} ${v > 0 ? "+" : ""}${v.toFixed(2)}`)
-          .join(" · ");
-        return `<div class="kv-row"><span class="kv-k mono">${esc(t.symbol)}</span>
-          <span>${esc(t.score.toFixed(3))}
-          <div class="mono" style="opacity:.6;font-size:11px">${esc(z)}</div></span></div>`;
-      }).join("");
-      const thin = ranking.thin_evidence || [];
-      return rows + (thin.length
-        ? `<div class="mono" style="opacity:.6;font-size:11px;color:var(--warn)">
-           ${thin.length} 个标的因子覆盖偏薄：${esc(thin.join(", "))}</div>`
-        : "");
-    }
-
-    function renderExperts(experts) {
-      const kv = (k, v) => `<div class="kv-row"><span class="kv-k">${esc(k)}</span><span>${esc(v)}</span></div>`;
-      const macro = experts.macro || {};
-      const eq = experts.equity || {};
-      const fi = experts.fixed_income || {};
-      const pc = experts.portfolio_construction || {};
-      const co = experts.compliance || {};
-      byId("experts-body").innerHTML = `
-        <div class="grid-2">
-          <div class="expert-card"><h3>宏观研究</h3>
-            ${kv("倾向", macro.tilt || "—")}
-            ${kv("置信度", macro.confidence != null ? pct(macro.confidence) : "—")}
-            ${kv("市场环境", macro.regime || "—")}
+      <section class="two-thirds" id="sec-alloc">
+        <h2><span class="idx">01</span>资产配置<span class="h2-note">钱怎么分到各类资产</span></h2>
+        <div class="body">
+          <div class="alloc-split">
+            <div id="alloc-donut"></div>
+            <div>
+              <div class="bars" id="alloc-bars"></div>
+              <div class="plain" id="alloc-plain"></div>
+            </div>
           </div>
-          <div class="expert-card"><h3>权益筛选</h3>
-            ${kv("候选数", eq.candidate_count ?? "—")}
-            ${kv("固收候选", fi.candidate_count ?? "—")}
-            ${kv("排序方式", eq.ranking?.method === "factor" ? "多因子打分" : "规模优先")}
-            ${factorRows(eq.ranking)}
-          </div>
-          <div class="expert-card"><h3>组合构建</h3>
-            ${kv("组合风险", pc.portfolio_r_level || "—")}
-            ${kv("境外敞口", pc.fx_exposure != null ? pct(pc.fx_exposure) : "—")}
-            ${kv("持仓数", pc.n_positions ?? "—")}
-          </div>
-          <div class="expert-card"><h3>合规初审</h3>
-            ${kv("结论", co.decision || "—")}
-            ${kv("置信度", co.confidence != null ? pct(co.confidence) : "—")}
-            ${co.violations?.length ? `<div class="kv-row" style="color:var(--danger)">违规:${esc(co.violations.join("; "))}</div>` : ""}
-          </div>
-        </div>`;
-    }
-
-    // ---- Crosscheck panel ----
-    function renderCrosscheck(cc) {
-      const agreementColor = cc.agreement === "unanimous" ? "var(--pass)"
-        : cc.agreement === "split" ? "var(--warn)" : "var(--muted)";
-      const escalations = (cc.escalation_signals || []).map(
-        (s) => `<span class="pill pill-reject">${esc(s)}</span>`).join(" ") || "<em>无</em>";
-
-      // Pillar one: one row per reconciled signal. A single source is shown as
-      // capped at 50% rather than hidden — "we only have one publisher for this"
-      // is the finding, not a gap in the display.
-      const signals = cc.consensus_signals || [];
-      const signalRows = signals.map((s) => {
-        const color = s.disagreement ? "var(--warn)" : "var(--muted)";
-        const readings = Object.entries(s.readings || {})
-          .map(([src, v]) => `${esc(src)}=${esc(v)}`).join(" · ");
-        return `<tr>
-          <td class="mono">${esc(s.signal)}</td>
-          <td class="num">${esc(s.value)}</td>
-          <td class="num" style="color:${color}">${s.confidence != null ? pct(s.confidence) : "—"}</td>
-          <td style="color:${color}">${esc(String(s.sources?.length ?? 0))} 源${s.disagreement ? " ⚠" : ""}
-            <div class="mono" style="opacity:.6;font-size:11px">${readings}</div></td>
-        </tr>`;
-      }).join("");
-
-      const mq = cc.market_data_quality || {};
-      const disputed = (mq.disputed || []);
-
-      byId("crosscheck-body").innerHTML = `
-        <table style="margin-bottom:12px">
-          <tr><th>指标</th><th>值</th></tr>
-          <tr><td>宏观倾向</td><td>${esc(cc.macro_tilt || "—")}</td></tr>
-          <tr><td>陪审置信度</td><td>${cc.macro_confidence != null ? pct(cc.macro_confidence) : "—"}</td></tr>
-          <tr><td>数据置信度</td><td>${cc.data_confidence != null ? pct(cc.data_confidence) : "—"}</td></tr>
-          <tr><td>评判一致性</td><td style="color:${agreementColor};font-weight:700">${esc(cc.agreement || "—")}</td></tr>
-          <tr><td>数据源</td><td class="mono">${esc((cc.data_sources || []).join(" · ") || "—")}</td></tr>
-          <tr><td>升级信号</td><td>${escalations}</td></tr>
-        </table>
-        ${signals.length ? `<h3 style="font-size:12px;opacity:.7;margin:0 0 6px">支柱一 · 多源共识</h3>
-        <table style="margin-bottom:12px">
-          <thead><tr><th>信号</th><th class="num">共识值</th><th class="num">置信</th><th>来源</th></tr></thead>
-          <tbody>${signalRows}</tbody>
-        </table>` : ""}
-        <div class="kv-row"><span class="kv-k">行情双源核对</span>
-          <span>${esc(mq.cross_checked ?? 0)} / ${esc(mq.candidates ?? 0)} 个标的
-          ${disputed.length ? `<span style="color:var(--warn)">· ${disputed.length} 个报价分歧已剔除</span>` : ""}</span></div>
-        ${disputed.length ? `<div class="mono" style="opacity:.6;font-size:11px">${esc(disputed.join(", "))}</div>` : ""}`;
-    }
-
-    // ---- Compliance panel ----
-    function renderCompliance(comp) {
-      const decision = comp.compliance_decision || "";
-      const decisionPill = decision === "PASS" ? "pill-pass"
-        : decision === "REJECT" ? "pill-reject" : "pill-downgrade";
-
-      // C×R matrix
-      const matrix = comp.cr_matrix || [];
-      const rLevels = comp.r_levels_used || [];
-      const investorC = comp.investor_c_level || "";
-      const portR = comp.portfolio_r_level || "";
-
-      let matrixHtml = "";
-      if (matrix.length && rLevels.length) {
-        const header = `<tr><th>投资者 ↓ / 产品 →</th>${rLevels.map((r) => `<th>${esc(r)}</th>`).join("")}</tr>`;
-        const rows = matrix.map((row) => {
-          const isSelf = row.c_level === investorC;
-          const cells = rLevels.map((r) => {
-            const val = row[r] || "";
-            const cls = val === "suitable" ? "pill-suitable" : "pill-over";
-            const selfMark = (isSelf && r === portR) ? " pill-self" : "";
-            return `<td><span class="pill ${cls}${selfMark}">${esc(val)}</span></td>`;
-          }).join("");
-          return `<tr><td><strong>${esc(row.c_level)}${isSelf ? " ←" : ""}</strong></td>${cells}</tr>`;
-        }).join("");
-        matrixHtml = `<table style="margin-bottom:12px"><thead>${header}</thead><tbody>${rows}</tbody></table>`;
-      }
-
-      // Disclosure checklist
-      const fieldLabels = {
-        suitability_match: "适当性匹配说明",
-        risk_disclosure: "风险揭示",
-        not_advice_disclaimer: "非投资建议声明",
-        fx_cross_border_disclosure: "汇率/跨境风险揭示",
-      };
-      const checklist = (comp.disclosure_checklist || []).map((item) => {
-        const cls = item.present ? "check-present" : "check-missing";
-        return `<div class="${cls}">${esc(fieldLabels[item.field] || item.field)}</div>`;
-      }).join("");
-
-      byId("compliance-body").innerHTML = `
-        <div style="margin-bottom:10px">
-          结论：<span class="pill ${decisionPill}">${esc(decision || "—")}</span>
+          <h3>组合特征</h3>
+          <div class="metric-grid" id="alloc-metrics"></div>
+          <div class="stat-note" id="alloc-metrics-note" style="margin-top:6px"></div>
         </div>
-        ${matrixHtml}
-        <div style="margin-bottom:8px;font-size:12px;font-weight:700;color:var(--muted)">披露清单</div>
-        ${checklist}
-        ${comp.violations?.length ? `<div style="margin-top:10px;font-size:12px;color:var(--danger)">${comp.violations.map((v) => `• ${esc(v)}`).join("<br>")}</div>` : ""}`;
-    }
+      </section>
 
-    // ---- Cost panel ----
-    function renderCost(cost) {
-      const kpis = [
-        { k: "Token 用量", v: (cost.tokens_used ?? 0).toLocaleString() },
-        { k: "预估费用", v: "$" + fmt(cost.cost_usd, 5) },
-        { k: "LLM 调用预算", v: cost.budget_spent ?? "—" },
-        { k: "节点数", v: cost.node_count ?? "—" },
-        { k: "Trace 事件", v: cost.trace_event_count ?? "—" },
-      ];
-      byId("cost-kpis").innerHTML = kpis.map(({ k, v }) =>
-        `<div class="kpi"><div class="klabel">${esc(k)}</div><div class="kvalue">${esc(v)}</div></div>`
-      ).join("");
+      <section class="third" id="sec-explain">
+        <h2><span class="idx">02</span>方案说明<span class="h2-note">完整表述</span></h2>
+        <div class="body"><div class="doc" id="explain-body"><p class="empty">尚未运行。</p></div></div>
+      </section>
 
-      // Offline mode disclaimer: surface when the backend signals no real token billing
-      const offlineNote = cost.note
-        ? `<div style="margin-top:8px;padding:6px 10px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;font-size:12px;color:#0c4a6e">${esc(cost.note)}</div>`
-        : "";
+      <section class="full" id="sec-exec">
+        <h2><span class="idx">03</span>执行清单<span class="h2-note">照着买就行，已按最小交易单位取整</span></h2>
+        <div class="body">
+          <div class="metric-grid" id="exec-metrics"></div>
+          <div class="table-scroll" id="exec-table"></div>
+          <div id="exec-guidance"></div>
+          <div id="exec-dropped"></div>
+        </div>
+      </section>
 
-      const timings = cost.node_timings || [];
-      const log = timings.map((t) =>
-        `<div class="node-entry"><span class="node-name">${esc(t.node)}</span> — ${fmt(t.latency_s, 3)}s</div>`
-      ).join("");
-      byId("pipeline-log").innerHTML = offlineNote + (log
-        ? `<div class="node-log" style="margin-top:10px">${log}</div>`
-        : "");
-    }
+      <div class="tier">
+        <span class="tier-n">二</span><span class="tier-t">论证与审查</span>
+        <span class="tier-d">凭什么这么建议，以及谁在把关</span>
+      </div>
 
-    // ---- Full dashboard render ----
-    function renderDashboard(data) {
-      const status = data.status || "";
-      const isIssued = status === "done";
+      <section class="third" id="sec-comply">
+        <h2><span class="idx">04</span>合规审查<span class="h2-note">适当性与披露</span></h2>
+        <div class="body" id="compliance-body"><p class="empty">尚未运行。</p></div>
+      </section>
 
-      // Advisory halt banner: show for any non-done terminal status
-      const haltEl = byId("advisory-halt");
-      const allocSection = byId("alloc-section");
-      if (!isIssued && status) {
-        haltEl.style.display = "block";
-        byId("halt-detail").textContent =
-          `管线状态: ${status} — 投顾建议未能出具，请人工审核。合规结论: ` +
-          (data.compliance?.compliance_decision || data.compliance?.decision || "—");
-        // Grey-out the allocation panel so weights are not presented as actionable
-        allocSection.classList.add("panel-dimmed");
-        byId("exec-section").classList.add("panel-dimmed");
-      } else {
-        haltEl.style.display = "none";
-        allocSection.classList.remove("panel-dimmed");
-        byId("exec-section").classList.remove("panel-dimmed");
-      }
+      <section class="two-thirds" id="sec-cross">
+        <h2><span class="idx">05</span>交叉验证<span class="h2-note">这些数字凭什么可信</span></h2>
+        <div class="body" id="crosscheck-body"><p class="empty">尚未运行。</p></div>
+      </section>
 
-      if (data.allocation) renderAlloc(data.allocation);
-      if (data.execution)  renderExecution(data.execution);
-      if (data.experts)    renderExperts(data.experts);
-      if (data.crosscheck) renderCrosscheck(data.crosscheck);
-      if (data.compliance) renderCompliance(data.compliance);
-      if (data.cost)       renderCost(data.cost);
-      setStatus(`完成 — 状态: ${status || "—"}`);
-    }
+      <section class="full" id="sec-experts">
+        <h2><span class="idx">06</span>专家贡献<span class="h2-note">五个 Agent 各自的产出</span></h2>
+        <div class="body" id="experts-body"><p class="empty">尚未运行。</p></div>
+      </section>
 
-    function collectProfile() {
-      const fd = new FormData(byId("run-form"));
-      return {
-        risk_level: fd.get("risk_level"),
-        investable: parseFloat(fd.get("investable")),
-        horizon_years: parseInt(fd.get("horizon_years"), 10),
-        goals: fd.get("goals").split(",").map((g) => g.trim()).filter(Boolean),
-        liquidity_min: parseFloat(fd.get("liquidity_min")),
-        accept_cross_border: fd.get("accept_cross_border") === "true",
-      };
-    }
+      <div class="tier">
+        <span class="tier-n">三</span><span class="tier-t">运行记录</span>
+        <span class="tier-d">这次跑了什么、花了多少</span>
+      </div>
 
-    // ---- Streaming run ----
-    let activeSource = null;
-    let streamTicker = null;
-    function streamRun() {
-      if (activeSource) { activeSource.close(); activeSource = null; }
-      const p = collectProfile();
-      const params = new URLSearchParams({
-        risk_level: p.risk_level,
-        investable: p.investable,
-        horizon_years: p.horizon_years,
-        goals: p.goals.join(","),
-        liquidity_min: p.liquidity_min,
-        accept_cross_border: p.accept_cross_border,
-      });
-      setStatus("连接 SSE 流…");
-      byId("pipeline-log").innerHTML = "";
-      const src = new EventSource(`/workbench/stream?${params}`);
-      activeSource = src;
+      <section class="full" id="sec-cost">
+        <h2><span class="idx">07</span>成本与管线<span class="h2-note">这次运行花了什么</span></h2>
+        <div class="body">
+          <div class="metric-grid" id="cost-metrics"></div>
+          <div id="cost-note"></div>
+          <h3>节点耗时</h3>
+          <div class="timeline" id="pipeline-log"><p class="empty">尚未运行。</p></div>
+        </div>
+      </section>
+    </main>
+  </div>
+  </div>
 
-      // The jury-backed nodes take tens of seconds each and emit nothing until
-      // they finish, so without a ticking elapsed time the page is
-      // indistinguishable from a hung request. Driven by node_start, which
-      // fires before the node runs.
-      let profileDesc = "";
-      let currentNode = null;
-      let nodeStartedAt = 0;
-      if (streamTicker) { clearInterval(streamTicker); streamTicker = null; }
-      const paintStatus = () => {
-        if (!currentNode) return;
-        const secs = ((Date.now() - nodeStartedAt) / 1000).toFixed(0);
-        setStatus(`运行中 — ${profileDesc} · ${currentNode} (${secs}s)`);
-      };
-      streamTicker = setInterval(paintStatus, 1000);
-      const stopTicker = () => {
-        if (streamTicker) { clearInterval(streamTicker); streamTicker = null; }
-      };
+<script>
+"use strict";
 
-      src.addEventListener("start", (e) => {
-        profileDesc = JSON.parse(e.data).profile;
-        setStatus("管线已启动 — " + profileDesc);
-      });
-      src.addEventListener("node_start", (e) => {
-        currentNode = JSON.parse(e.data).node;
-        nodeStartedAt = Date.now();
-        paintStatus();
-        const entry = document.createElement("div");
-        entry.className = "node-entry";
-        entry.id = "pending-node";
-        entry.innerHTML = `<span class="node-name">${esc(currentNode)}</span> — 运行中…`;
-        byId("pipeline-log").prepend(entry);
-      });
-      src.addEventListener("node", (e) => {
-        const d = JSON.parse(e.data);
-        const pending = byId("pending-node");
-        if (pending) pending.remove();
-        const entry = document.createElement("div");
-        entry.className = "node-entry";
-        entry.innerHTML = `<span class="node-name">${esc(d.node)}</span> — ${esc(JSON.stringify(d).slice(0, 120))}`;
-        byId("pipeline-log").prepend(entry);
-      });
-      src.addEventListener("complete", (e) => {
-        stopTicker();
-        const pending = byId("pending-node");
-        if (pending) pending.remove();
-        src.close();
-        activeSource = null;
-        renderDashboard(JSON.parse(e.data));
-      });
-      src.onerror = () => {
-        stopTicker();
-        setStatus("SSE 连接错误");
-        src.close();
-        activeSource = null;
-      };
-    }
+/* ======================================================================== */
+/* Glossary — every term the UI uses that a first-time investor would guess  */
+/* at. Definitions say what the number means and, where it matters, what it  */
+/* does NOT mean; a metric explained only in its own vocabulary is not       */
+/* explained.                                                               */
+/* ======================================================================== */
+const TERMS = {
+  c_level: "<b>风险测评等级 C1–C5</b>证券公司给投资者做的风险承受能力测评结果。C1 最保守，C5 最能承受波动。等级不是能力评价，只是匹配依据。",
+  r_level: "<b>产品风险等级 R1–R5</b>产品自身的风险等级。R1 是货币基金一类，R5 是高波动品种。监管要求 C 级投资者只能买不超过对应 R 级的产品。",
+  cr_match: "<b>适当性匹配</b>把投资者的 C 等级和组合的 R 等级对上：组合风险不得高于投资者的承受等级。不匹配就必须降档或拒绝出具，这是硬规则，不是建议。",
+  volatility: "<b>年化波动率</b>净值上下起伏的幅度。按正态近似，约七成年份的涨跌落在这个数字以内。数字越小越平稳，但<b>不代表不会亏</b>——它衡量颠簸程度，不是安全保证。",
+  sharpe: "<b>夏普比率</b>每承担一单位波动换回多少超额回报。通常大于 1 算不错，0.5 上下算一般。它是历史数据的比值，不预示未来。",
+  drawdown: "<b>最大回撤</b>从最高点跌到最低点的最大幅度。它回答的是「最难受的时候有多难受」，比平均收益更能反映拿不拿得住。",
+  diversification: "<b>分散度</b>钱是不是压在少数几个标的上。数值越高越分散，单个标的出事对整体的冲击越小。",
+  fx: "<b>境外敞口</b>投在港股、美股等外币资产上的比例。这部分除了标的本身的涨跌，还要承担<b>汇率波动</b>，以及港股通额度、QDII 通道和跨境税收的影响。",
+  liquidity: "<b>流动性仓位</b>能快速变现、几乎不亏本金的部分，主要是货币基金和现金。它是应急钱，不是用来赚收益的。",
+  consensus: "<b>多源共识</b>同一个数字向两个以上互相独立的数据源分别取一次，取中位数，并记录它们分歧多大。<b>只有一个源时置信度封顶 50%</b>——一个来源没法自己证明自己对。",
+  jury: "<b>多模型陪审</b>定性判断（宏观倾向、合规风险）交给来自不同厂商的多个模型分别投票，取多数。陪审<b>只能把结论改严，不能放松</b>。",
+  confidence: "<b>置信度</b>系统对这个判断有多大把握。它来自数据源数量、来源之间的分歧程度和模型投票的一致性，不是对收益的预测。",
+  factor: "<b>五因子打分</b>用价值、动量、低波、规模、流动性五个维度给候选股票打分排序。<b>本项目默认不启用</b>：回测显示它没跑赢更简单的规模规则。",
+  zscore: "<b>z 分</b>某只标的在这个因子上比同市场平均高（正）或低（负）多少个标准差。看 z 分而不只看总分，才知道它是因为便宜被选中，还是因为波动小。",
+  lot: "<b>手</b>股票的最小买卖单位。A 股 1 手 = 100 股，港股每只都不一样，美股可以买 1 股。清单里的数量已经按实际每手取整。",
+  entry: "<b>建仓节奏</b>分几次把钱投进去。分批买是为了摊薄「一次性买在高点」的运气成分，不是为了择时。",
+  rebalance: "<b>再平衡</b>过一段时间把偏离目标的比例调回来。涨得多的减一点、跌得多的补一点，只在大类之间做。",
+  drift: "<b>漂移阈值</b>某个大类实际占比偏离目标多少个百分点就提前调整。设阈值是为了避免频繁交易，也避免放任不管。",
+  disclosure: "<b>披露清单</b>监管要求方案里必须说清楚的几件事：适当性怎么匹配的、有什么风险、这不是投资建议、跨境有额外风险。<b>缺一项就不能出具</b>。",
+  budget: "<b>调用预算</b>单次咨询允许的模型调用次数上限。超过就直接终止，防止反思循环跑飞把账单烧穿。",
+  token: "<b>Token</b>模型处理文本的计费单位。离线模式下没有真实调用，所以是 0，不是「免费」。",
+  tilt: "<b>宏观倾向</b>对权益类资产的整体态度：超配（看多）、中性、低配（看空）。它影响筛选的松紧，不直接决定买哪只。",
+  guard: "<b>护栏</b>流水线里的确定性检查，分输入、过程、输出三层。它们不参与判断好坏，只负责拦住不该通过的东西。",
+};
 
-    // ---- POST run (no streaming) ----
-    async function postRun() {
-      setStatus("运行中…");
-      byId("run-btn").disabled = true;
-      try {
-        const res = await fetch("/workbench/run", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(collectProfile()),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        renderDashboard(await res.json());
-      } catch (err) {
-        setStatus("错误: " + err.message);
-      } finally {
-        byId("run-btn").disabled = false;
-      }
-    }
+/* ---------------------------------------------------------------- helpers */
 
-    byId("run-form").addEventListener("submit", (e) => {
-      e.preventDefault();
-      postRun();
+const byId = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+/** A term with its definition attached. Focusable so it works without a mouse. */
+function T(label, key, align) {
+  const def = TERMS[key];
+  if (!def) return esc(label);
+  return `<span class="term${align === "right" ? " tip-right" : ""}" tabindex="0"
+    >${esc(label)}<span class="tip" role="tooltip">${def}</span></span>`;
+}
+
+const isNum = (v) => typeof v === "number" && isFinite(v);
+const pct  = (v, d = 1) => isNum(v) ? (v * 100).toFixed(d) + "%" : "—";
+const dec  = (v, d = 2) => isNum(v) ? v.toFixed(d) : "—";
+const int  = (v) => isNum(v) ? Math.round(v).toLocaleString("en-US") : "—";
+const money = (v, ccy) => isNum(v)
+  ? Math.round(v).toLocaleString("en-US") + (ccy ? " " + ccy : "") : "—";
+/** Prices, unlike amounts, must keep their decimals: a bond fund quotes 1.2000
+ *  and a rounded "1" reads as a broken feed rather than as a NAV. */
+const price = (v) => !isNum(v) ? "—"
+  : v >= 100 ? v.toFixed(2)
+  : v >= 10  ? v.toFixed(3)
+  : v.toFixed(4);
+
+const CLASS_LABEL = { equity: "权益", bond: "债券", cash: "现金", fund: "基金", other: "其他" };
+const CLASS_COLOR = { equity: "#12325c", bond: "#2f7d6b", cash: "#a8801f", fund: "#5a4a8a", other: "#8a8f99" };
+const TILT_LABEL = { overweight: "超配权益", neutral: "中性", underweight: "低配权益" };
+
+/* --------------------------------------------------------------- SVG bits */
+
+/** Donut, hand-cut. `slices` is [{label, value 0–1, color}] and must not be
+ *  normalised here — a set of weights that does not add to 1 is a finding, and
+ *  silently rescaling it would hide exactly the bug worth seeing. */
+function donut(slices, size = 172, thickness = 26) {
+  const r = (size - thickness) / 2;
+  const c = 2 * Math.PI * r;
+  let offset = 0;
+  const arcs = slices.map((s) => {
+    const len = Math.max(0, s.value) * c;
+    const seg = `<circle cx="${size / 2}" cy="${size / 2}" r="${r}"
+      fill="none" stroke="${s.color}" stroke-width="${thickness}"
+      stroke-dasharray="${len.toFixed(2)} ${(c - len).toFixed(2)}"
+      stroke-dashoffset="${(-offset).toFixed(2)}"
+      transform="rotate(-90 ${size / 2} ${size / 2})"></circle>`;
+    offset += len;
+    return seg;
+  }).join("");
+  const total = slices.reduce((a, s) => a + s.value, 0);
+  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img"
+      aria-label="大类资产配置比例">
+    <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none"
+      stroke="#f0eee8" stroke-width="${thickness}"></circle>
+    ${arcs}
+    <text x="${size / 2}" y="${size / 2 - 2}" text-anchor="middle"
+      style="font-family:var(--font-num)" font-size="21" font-weight="600" fill="#16181d"
+      >${(total * 100).toFixed(0)}%</text>
+    <text x="${size / 2}" y="${size / 2 + 15}" text-anchor="middle"
+      style="font-family:var(--font-ui)" font-size="10.5" fill="#8a8f99">已配置</text>
+  </svg>`;
+}
+
+function bars(rows) {
+  const max = Math.max(0.0001, ...rows.map((r) => r.value));
+  return rows.map((r) => `
+    <div class="bar-row">
+      <div class="bar-k">${esc(r.label)}</div>
+      <div class="bar-track"><div class="bar-fill"
+        style="width:${(r.value / max * 100).toFixed(1)}%;background:${r.color}"></div></div>
+      <div class="bar-v">${pct(r.value)}</div>
+    </div>`).join("");
+}
+
+/* ===================================================================== */
+/* Panel 01 — allocation                                                 */
+/* ===================================================================== */
+
+function renderAlloc(alloc) {
+  const cw = alloc.class_weights || {};
+  const entries = Object.entries(cw)
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, v]) => ({
+      key: k,
+      label: CLASS_LABEL[k] || k,
+      value: v,
+      color: CLASS_COLOR[k] || CLASS_COLOR.other,
+    }));
+
+  byId("alloc-donut").innerHTML = entries.length ? donut(entries) : "";
+  byId("alloc-bars").innerHTML = entries.length ? bars(entries) : '<p class="empty">无配置数据。</p>';
+
+  // Plain-language read of the mix, derived from the actual weights rather than
+  // from a template: the sentence has to change when the numbers do.
+  const w = (k) => cw[k] || 0;
+  const eq = w("equity"), bd = w("bond"), ch = w("cash");
+  let shape;
+  if (eq >= 0.6)      shape = "以权益为主，波动会明显，换取长期增长";
+  else if (eq >= 0.35) shape = "股债大致均衡，兼顾增长与稳健";
+  else if (eq > 0.15)  shape = "以固收打底，权益只做增强";
+  else                 shape = "几乎全部配置在低风险资产上，求稳为先";
+  byId("alloc-plain").innerHTML =
+    `<b>怎么读这张图：</b>${esc(shape)}。债券与现金合计 ${pct(bd + ch)}，
+     其中 ${T("流动性仓位", "liquidity")} ${pct(ch)} 可随时取用应急；
+     权益 ${pct(eq)} 是承担波动、争取回报的部分。`;
+
+  const m = alloc.metrics || {};
+  const metrics = [
+    { k: T("年化波动率", "volatility"), v: pct(m.volatility, 2) },
+    { k: T("夏普比率", "sharpe"),      v: dec(m.sharpe) },
+    { k: T("最大回撤", "drawdown"),    v: isNum(m.max_drawdown) ? pct(m.max_drawdown, 1) : "—" },
+    { k: T("分散度", "diversification", "right"), v: dec(m.diversification) },
+  ];
+  byId("alloc-metrics").innerHTML = metrics.map((x) =>
+    `<div class="metric"><div class="k">${x.k}</div><div class="v">${x.v}</div></div>`).join("");
+
+  // A dash on a risk metric is ambiguous in the worst direction — it has to say
+  // "not computed", never be left to read as "no drawdown".
+  const missing = metrics.filter((x) => x.v === "—").length;
+  byId("alloc-metrics-note").innerHTML = missing
+    ? `「—」表示本版本未计算该指标，<b>不代表其为零</b>。`
+    : "";
+}
+
+/* ===================================================================== */
+/* Panel 03 — execution                                                  */
+/* ===================================================================== */
+
+function renderExecution(ex) {
+  const positions = ex.positions || [];
+
+  byId("exec-metrics").innerHTML = [
+    { k: "持仓笔数", v: int(ex.position_count) },
+    { k: "买入合计", v: money(ex.invested, "CNY") },
+    { k: "取整剩余", v: money(ex.cash_residual, "CNY") },
+    { k: "投入本金", v: money(ex.investable, "CNY") },
+  ].map((x) => `<div class="metric"><div class="k">${x.k}</div><div class="v">${x.v}</div></div>`).join("");
+
+  if (!positions.length) {
+    byId("exec-table").innerHTML = '<p class="empty">本次未生成可执行清单。</p>';
+    byId("exec-guidance").innerHTML = "";
+    byId("exec-dropped").innerHTML = "";
+    return;
+  }
+
+  const rows = positions.map((p) => {
+    // Only quote 手 where a board lot actually exists — US venues trade singles,
+    // and printing "1 手" against a US ticker would be wrong, not just noisy.
+    const qty = p.lot_size > 1
+      ? `${int(p.lots)} 手 / ${int(p.shares)} 股`
+      : `${int(p.shares)} 股`;
+    return `<tr>
+      <td>${esc(p.name)}</td>
+      <td class="sym">${esc(p.symbol)}</td>
+      <td>${esc(p.market)}</td>
+      <td>${esc(CLASS_LABEL[p.asset_class] || p.asset_class)}</td>
+      <td class="num">${pct(p.weight)}</td>
+      <td class="num">${esc(qty)}</td>
+      <td class="num">${price(p.price)}</td>
+      <td class="num">${money(p.amount, p.currency)}</td>
+    </tr>`;
+  }).join("");
+
+  byId("exec-table").innerHTML = `<table>
+    <thead><tr>
+      <th>名称</th><th>代码</th><th>市场</th><th>类别</th>
+      <th class="num">权重</th><th class="num">${T("数量", "lot")}</th>
+      <th class="num">现价/净值</th><th class="num">金额</th>
+    </tr></thead>
+    <tbody>${rows}</tbody></table>`;
+
+  const g = ex.guidance || {};
+  const channels = (g.channels || []).map((c) => `<li>${esc(c)}</li>`).join("");
+  byId("exec-guidance").innerHTML = (g.entry || g.rebalance) ? `
+    <h3>接下来怎么做</h3>
+    <div class="kv"><span class="k">${T("建仓节奏", "entry")}</span>
+      <span class="v">${esc(g.entry?.detail || "—")}</span></div>
+    <div class="kv"><span class="k">${T("再平衡", "rebalance")}</span>
+      <span class="v">${esc(g.rebalance?.detail || "—")}</span></div>
+    ${channels ? `<div class="kv"><span class="k">交易渠道</span>
+      <span class="v"><ul style="margin:0;padding-left:16px;line-height:1.75">${channels}</ul></span></div>` : ""}` : "";
+
+  // Dropped names are shown, not hidden: "one lot costs more than this name's
+  // entire allocation" is information the investor is entitled to.
+  const dropped = ex.dropped || [];
+  byId("exec-dropped").innerHTML = dropped.length
+    ? `<details><summary>${dropped.length} 个标的未纳入清单 — 查看原因</summary>
+       <ul>${dropped.map((d) => `<li class="mono">${esc(d)}</li>`).join("")}</ul></details>`
+    : "";
+}
+
+/* ===================================================================== */
+/* Panel 04 — the human-readable plan                                    */
+/* ===================================================================== */
+
+function renderExplanation(text) {
+  if (!text) { byId("explain-body").innerHTML = '<p class="empty">本次未生成方案说明。</p>'; return; }
+  // The backend emits a plain-text document with indented list lines. Keep its
+  // structure rather than dumping it into a <pre>: this is the part a
+  // non-technical reader actually reads.
+  const html = String(text).split("\n").map((line) => {
+    const t = line.trim();
+    if (!t) return "";
+    if (/^[·•]/.test(t) || /^\s{2,}/.test(line)) return `<div class="doc-li">${esc(t.replace(/^[·•]\s*/, ""))}</div>`;
+    if (/[：:]$/.test(t)) return `<div class="doc-h">${esc(t)}</div>`;
+    return `<p>${esc(t)}</p>`;
+  }).join("");
+  byId("explain-body").innerHTML = html;
+}
+
+/* ===================================================================== */
+/* Panel 05 — cross-validation                                           */
+/* ===================================================================== */
+
+const STAGE_LABEL = { macro_tilt: "宏观倾向", compliance: "合规裁决" };
+const VOTE_LABEL = { overweight: "超配", neutral: "中性", underweight: "低配",
+                     PASS: "通过", DOWNGRADE: "降档", REJECT: "拒绝" };
+
+/** Who voted what. The composite confidence alone cannot be reviewed — "100%"
+ *  says the jurors agreed, not who they were or what they agreed on. */
+function juryTable(cc) {
+  const votes = cc.jury_votes || [];
+  if (!votes.length) {
+    return `<p class="empty">本次运行未召集陪审（合规陪审只在非 PASS 裁决或高外币敞口时触发）。</p>`;
+  }
+  // Offline jurors are deterministic rule stand-ins, not models. Saying so here
+  // is the difference between a demo that looks like it ran three labs and one
+  // that admits it ran none.
+  const offline = votes.some((v) => String(v.source || "").startsWith("offline"));
+  const rows = votes.map((v) => `<tr>
+      <td>${esc(STAGE_LABEL[v.stage] || v.stage || "—")}</td>
+      <td class="sym">${esc(v.source)}</td>
+      <td><span class="pill ${v.label === "REJECT" ? "pill-reject"
+        : v.label === "DOWNGRADE" ? "pill-warn" : "pill-mute"}">${esc(VOTE_LABEL[v.label] || v.label || "—")}</span></td>
+    </tr>`).join("");
+  return `<div class="table-scroll"><table>
+      <thead><tr><th>判定</th><th>陪审员</th><th>票</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>` +
+    (offline ? `<div class="note">当前是<b>离线样例模式</b>：陪审员是两个确定性规则替身
+      （<span class="mono">offline-a / offline-b</span>），不是真实模型。设
+      <span class="mono">USE_REAL_PROVIDERS=true</span> 并配好
+      <span class="mono">GLM_API_KEY</span> 与 <span class="mono">SILICONFLOW_API_KEY</span>
+      后，才会换成 GLM-4.7（智谱）+ DeepSeek-V3 + Ling-flash-2.0（蚂蚁）这个跨三家实验室的奇数陪审团。</div>` : "");
+}
+
+function renderCrosscheck(cc) {
+  const signals = cc.consensus_signals || [];
+  const signalRows = signals.map((s) => {
+    const single = (s.sources || []).length < 2;
+    const readings = Object.entries(s.readings || {})
+      .map(([src, v]) => `${esc(src)} = ${esc(v)}`).join("　");
+    const flag = s.disagreement ? '<span class="pill pill-warn">分歧</span>'
+      : single ? '<span class="pill pill-mute">单源</span>'
+      : '<span class="pill pill-pass">一致</span>';
+    return `<tr>
+      <td class="sym">${esc(s.signal)}</td>
+      <td class="num">${esc(s.value)}</td>
+      <td class="num">${pct(s.confidence, 0)}</td>
+      <td>${flag} <span class="mono" style="color:var(--ink-3);font-size:11px">${readings}</span></td>
+    </tr>`;
+  }).join("");
+
+  const mq = cc.market_data_quality || {};
+  const disputed = mq.disputed || [];
+  const esc_signals = (cc.escalation_signals || []);
+  const agreementLabel = { unanimous: "一致", split: "分歧", "n/a": "本次未触发陪审" }[cc.agreement] || cc.agreement;
+
+  const dataConf = cc.data_confidence;
+  const confPlain = !isNum(dataConf) ? ""
+    : dataConf <= 0.5
+      ? `<div class="plain"><b>为什么置信度只有 ${pct(dataConf, 0)}：</b>
+         本次对账时每个信号只有一个数据源可用。一个来源无法自证，所以置信度<b>按规则封顶 50%</b>——
+         这是系统在如实报告它知道多少，不是数据出了错。</div>`
+      : `<div class="plain"><b>置信度 ${pct(dataConf, 0)}：</b>
+         多个独立来源相互对上了。数字越高，说明各来源之间的分歧越小。</div>`;
+
+  byId("crosscheck-body").innerHTML = `
+    <h3>支柱一 · ${T("多源共识", "consensus")}</h3>
+    ${signals.length ? `<div class="table-scroll"><table>
+      <thead><tr><th>信号</th><th class="num">共识值</th>
+        <th class="num">${T("置信", "confidence")}</th><th>来源与读数</th></tr></thead>
+      <tbody>${signalRows}</tbody></table></div>` : '<p class="empty">本次无对账信号。</p>'}
+    ${confPlain}
+    <div class="kv" style="margin-top:8px"><span class="k">行情双源核对</span>
+      <span class="v">${int(mq.cross_checked)} / ${int(mq.candidates)} 个标的已逐一对账
+      ${disputed.length ? `<span style="color:var(--warn)">，${disputed.length} 个报价分歧已剔除</span>` : ""}</span></div>
+    ${disputed.length ? `<div class="mono" style="font-size:11px;color:var(--ink-3);padding-left:94px">${esc(disputed.join("、"))}</div>` : ""}
+
+    <h3>支柱二 · ${T("多模型陪审", "jury")}</h3>
+    ${juryTable(cc)}
+    <div class="kv"><span class="k">${T("宏观倾向", "tilt")}</span>
+      <span class="v">${esc(TILT_LABEL[cc.macro_tilt] || cc.macro_tilt || "—")}</span></div>
+    <div class="kv"><span class="k">陪审${T("置信", "confidence")}</span>
+      <span class="v">${pct(cc.macro_confidence, 0)}</span></div>
+    <div class="kv"><span class="k">投票一致性</span>
+      <span class="v">${esc(agreementLabel || "—")}
+        <span style="color:var(--ink-3)">（${int(cc.jury_deliberations)} 次合议 / ${int(cc.jury_event_count)} 张票）</span></span></div>
+    <div class="kv"><span class="k">升级信号</span><span class="v">${
+      esc_signals.length
+        ? esc_signals.map((s) => `<span class="pill pill-reject">${esc(s)}</span>`).join(" ")
+        : '<span style="color:var(--ink-3)">无</span>'}</span></div>
+    <div class="kv"><span class="k">数据源</span>
+      <span class="v mono" style="font-size:11.5px">${esc((cc.data_sources || []).join(" · ") || "—")}</span></div>`;
+}
+
+/* ===================================================================== */
+/* Panel 02 — compliance                                                 */
+/* ===================================================================== */
+
+const DISCLOSURE_LABEL = {
+  suitability_match: "适当性匹配说明",
+  risk_disclosure: "风险揭示",
+  not_advice_disclaimer: "非投资建议声明",
+  fx_cross_border_disclosure: "跨境与汇率风险揭示",
+};
+
+function renderCompliance(comp) {
+  const decision = comp.compliance_decision || comp.decision || "";
+  const pill = decision === "PASS" ? "pill-pass" : decision === "REJECT" ? "pill-reject" : "pill-warn";
+  const decisionLabel = { PASS: "通过", DOWNGRADE: "需降档", REJECT: "拒绝出具" }[decision] || decision || "—";
+
+  const matrix = comp.cr_matrix || [];
+  const rLevels = comp.r_levels_used || [];
+  const investorC = comp.investor_c_level || "";
+  const portR = comp.portfolio_r_level || "";
+
+  let matrixHtml = "";
+  if (matrix.length && rLevels.length) {
+    const header = `<tr><th>投资者 ＼ 产品</th>${rLevels.map((r) => `<th>${esc(r)}</th>`).join("")}</tr>`;
+    const rows = matrix.map((row) => {
+      const self = row.c_level === investorC;
+      const cells = rLevels.map((r) => {
+        const val = row[r] || "";
+        const cls = val === "suitable" ? "ok" : "no";
+        const here = (self && r === portR) ? " here" : "";
+        return `<td><span class="cell ${cls}${here}">${val === "suitable" ? "可" : "超"}</span></td>`;
+      }).join("");
+      return `<tr><td>${self ? "<b>" + esc(row.c_level) + " ←</b>" : esc(row.c_level)}</td>${cells}</tr>`;
+    }).join("");
+    matrixHtml = `<table class="matrix"><thead>${header}</thead><tbody>${rows}</tbody></table>
+      <div class="plain">框内是本方案的位置：投资者 <b>${esc(investorC)}</b>、组合
+        <b>${esc(portR)}</b>。「可」表示该等级投资者可以买这一档产品，「超」表示超出承受等级、系统不会出具。</div>`;
+  }
+
+  const checklist = (comp.disclosure_checklist || []).map((item) => `
+    <div class="check ${item.present ? "on" : "off"}">
+      <span class="mark">${item.present ? "✓" : "✗"}</span>
+      <span>${esc(DISCLOSURE_LABEL[item.field] || item.field)}</span>
+    </div>`).join("");
+
+  byId("compliance-body").innerHTML = `
+    <div class="kv"><span class="k">审核结论</span>
+      <span class="v"><span class="pill ${pill}">${esc(decisionLabel)}</span></span></div>
+    <div class="kv"><span class="k">${T("适当性", "cr_match")}</span>
+      <span class="v">${comp.compliance_matched ? "匹配" : "不匹配"}</span></div>
+    <h3>${T("C×R 适当性矩阵", "r_level")}</h3>
+    ${matrixHtml || '<p class="empty">无矩阵数据。</p>'}
+    <h3>${T("披露清单", "disclosure")}</h3>
+    ${checklist || '<p class="empty">无披露项。</p>'}
+    ${comp.violations?.length
+      ? `<div class="note">${comp.violations.map((v) => "· " + esc(v)).join("<br>")}</div>` : ""}`;
+}
+
+/* ===================================================================== */
+/* Panel 06 — experts                                                    */
+/* ===================================================================== */
+
+const FACTOR_LABELS = { value: "价值", momentum: "动量", low_vol: "低波", size: "规模", liquidity: "流动性" };
+
+function factorBlock(ranking) {
+  const top = ranking?.top || [];
+  if (!top.length) return "";
+  const rows = top.map((t) => {
+    const z = Object.entries(t.z || {}).map(([k, v]) =>
+      `<span class="zbadge ${v > 0 ? "pos" : v < 0 ? "neg" : ""}">${FACTOR_LABELS[k] || k} ${v > 0 ? "+" : ""}${v.toFixed(2)}</span>`
+    ).join(" ");
+    return `<div class="zrow"><span class="mono" style="min-width:58px">${esc(t.symbol)}</span>
+      <span class="mono" style="min-width:46px">${t.score.toFixed(3)}</span>
+      <span>${z}</span></div>`;
+  }).join("");
+  const thin = ranking.thin_evidence || [];
+  return `<div style="margin-top:6px">${rows}</div>` + (thin.length
+    ? `<div class="note">${thin.length} 个标的因子覆盖偏薄（可用数据少于门槛），排名证据弱于同侪：
+       <span class="mono">${esc(thin.join("、"))}</span></div>` : "");
+}
+
+function renderExperts(experts) {
+  const kv = (k, v) => `<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+  const macro = experts.macro || {};
+  const eq = experts.equity || {};
+  const fi = experts.fixed_income || {};
+  const pc = experts.portfolio_construction || {};
+  const co = experts.compliance || {};
+  const isFactor = eq.ranking?.method === "factor";
+
+  byId("experts-body").innerHTML = `<div class="cards">
+    <div class="card"><h4>宏观研究<span class="role">MACRO</span></h4>
+      ${kv(T("倾向", "tilt"), esc(TILT_LABEL[macro.tilt] || macro.tilt || "—"))}
+      ${kv(T("置信度", "confidence"), pct(macro.confidence, 0))}
+      ${kv("市场环境", esc(macro.regime || "—"))}
+    </div>
+    <div class="card"><h4>权益筛选<span class="role">EQUITY</span></h4>
+      ${kv("权益候选", int(eq.candidate_count))}
+      ${kv("固收候选", int(fi.candidate_count))}
+      ${kv("排序方式", isFactor ? T("五因子打分", "factor") : "规模优先（默认）")}
+      ${isFactor ? `<div style="font-size:11.5px;color:var(--ink-3);padding-top:4px">
+        按 ${T("z 分", "zscore")} 复合排序</div>` + factorBlock(eq.ranking) : ""}
+    </div>
+    <div class="card"><h4>组合构建<span class="role">PORTFOLIO</span></h4>
+      ${kv(T("组合风险", "r_level"), esc(pc.portfolio_r_level || "—"))}
+      ${kv(T("境外敞口", "fx"), pct(pc.fx_exposure))}
+      ${kv("持仓数", int(pc.n_positions))}
+    </div>
+    <div class="card"><h4>合规初审<span class="role">COMPLIANCE</span></h4>
+      ${kv("规则结论", esc(co.decision || "—"))}
+      ${kv(T("置信度", "confidence", "right"), pct(co.confidence, 0))}
+      ${co.violations?.length
+        ? `<div class="note">${co.violations.map(esc).join("<br>")}</div>`
+        : `<div style="font-size:11.5px;color:var(--ink-3);padding-top:4px">未发现违规项</div>`}
+    </div>
+  </div>`;
+}
+
+/* ===================================================================== */
+/* Panel 07 — cost and pipeline                                          */
+/* ===================================================================== */
+
+function renderCost(cost) {
+  byId("cost-metrics").innerHTML = [
+    { k: T("Token 用量", "token"), v: int(cost.tokens_used) },
+    { k: "预估费用", v: isNum(cost.cost_usd) ? "$" + cost.cost_usd.toFixed(5) : "—" },
+    { k: T("调用预算", "budget", "right"), v: int(cost.budget_spent) },
+    { k: "节点数", v: int(cost.node_count) },
+    { k: "唯一节点", v: int((cost.unique_nodes || []).length) },
+    { k: "Trace 事件", v: int(cost.trace_event_count) },
+  ].map((x) => `<div class="metric"><div class="k">${x.k}</div><div class="v">${x.v}</div></div>`).join("");
+
+  byId("cost-note").innerHTML = cost.note ? `<div class="note">${esc(cost.note)}</div>` : "";
+  renderTimeline(cost.node_timings || []);
+}
+
+function renderTimeline(timings) {
+  if (!timings.length) { byId("pipeline-log").innerHTML = '<p class="empty">尚未运行。</p>'; return; }
+  const max = Math.max(...timings.map((t) => t.latency_s || 0), 0.001);
+  byId("pipeline-log").innerHTML = timings.map((t) => `
+    <div class="tl-row">
+      <div class="tl-n" title="${esc(t.node)}">${esc(t.node)}</div>
+      <div class="tl-track"><div class="tl-fill" style="width:${((t.latency_s || 0) / max * 100).toFixed(1)}%"></div></div>
+      <div class="tl-v">${(t.latency_s || 0).toFixed(3)}s</div>
+    </div>`).join("");
+}
+
+/* ===================================================================== */
+/* Verdict strip                                                         */
+/* ===================================================================== */
+
+const STATUS_TEXT = {
+  done: "方案已出具",
+  NEEDS_REVIEW: "需人工复核",
+  CANNOT_ISSUE: "无法出具",
+  GUARDRAIL_BLOCKED: "已被护栏拦截",
+  BUDGET_EXCEEDED: "超出调用预算，已终止",
+};
+
+function renderVerdict(data) {
+  const status = data.status || "";
+  const comp = data.compliance || {};
+  const alloc = data.allocation || {};
+  const cc = data.crosscheck || {};
+  const issued = status === "done";
+  const decision = comp.compliance_decision || comp.decision || "";
+
+  const el = byId("verdict");
+  el.style.display = "";
+  el.className = "verdict " + (issued && decision === "PASS" ? "is-pass"
+    : decision === "REJECT" || status === "CANNOT_ISSUE" ? "is-reject" : "is-warn");
+
+  byId("verdict-headline").textContent = STATUS_TEXT[status] || status || "—";
+
+  const c = comp.investor_c_level || "—";
+  const r = comp.portfolio_r_level || alloc.portfolio_r_level || "—";
+  byId("verdict-plain").innerHTML = issued && decision === "PASS"
+    ? `你的${T("风险测评等级", "c_level")}是 <b>${esc(c)}</b>，这份方案的${T("产品风险等级", "r_level")}是
+       <b>${esc(r)}</b>，没有超出你的承受范围，因此可以出具。下方「执行清单」可直接照做。`
+    : `本次未通过完整审核，下方配置<b>不作为可执行建议</b>。合规结论：${esc(decision || "—")}。`;
+
+  byId("cr-chain").innerHTML = `
+    <span class="cr-node hi">${esc(c)}</span>
+    <span class="cr-arrow">──▸</span>
+    <span class="cr-node">${esc(r)}</span>
+    <span class="cr-verdict" style="color:${comp.compliance_matched ? "var(--pass)" : "var(--danger)"}">
+      ${comp.compliance_matched ? "✓ 适当性匹配" : "✗ 不匹配"}</span>`;
+
+  const fx = alloc.fx_exposure;
+  const conf = cc.data_confidence;
+  const stats = [
+    { k: "投入本金", v: money(data.execution?.investable) + '<span class="ccy">CNY</span>' },
+    { k: T("组合风险等级", "r_level"), v: esc(r) },
+    { k: T("年化波动率", "volatility"),
+      v: pct(alloc.metrics?.volatility, 2),
+      note: isNum(alloc.metrics?.volatility)
+        ? `约七成年份涨跌在 ±${pct(alloc.metrics.volatility, 1)} 内` : "" },
+    { k: T("境外敞口", "fx"), v: pct(fx),
+      note: isNum(fx) && fx > 0 ? "这部分另需承担汇率波动" : "无外币资产" },
+    { k: "持仓笔数", v: int(data.execution?.position_count) },
+    { k: T("数据置信度", "confidence", "right"), v: pct(conf, 0),
+      flag: isNum(conf) && conf <= 0.5,
+      note: isNum(conf) && conf <= 0.5 ? "单一数据源，按规则封顶" : "" },
+  ];
+  byId("verdict-stats").innerHTML = stats.map((s) => `
+    <div class="stat${s.flag ? " flag" : ""}">
+      <div class="stat-k">${s.k}</div>
+      <div class="stat-v">${s.v}</div>
+      ${s.note ? `<div class="stat-note">${s.note}</div>` : ""}
+    </div>`).join("");
+}
+
+/* ===================================================================== */
+/* Dashboard                                                             */
+/* ===================================================================== */
+
+function renderDashboard(data) {
+  const status = data.status || "";
+  const issued = status === "done";
+
+  byId("meta-run").textContent = (data.run_id || "—").slice(0, 8);
+  byId("meta-time").textContent = new Date().toLocaleString("zh-CN", { hour12: false });
+  byId("meta-mode").textContent = data.cost?.note ? "离线样例" : "真实数据";
+
+  const halt = byId("halt");
+  if (!issued && status) {
+    halt.style.display = "block";
+    byId("halt-detail").innerHTML =
+      `管线终止于状态 <span class="mono">${esc(status)}</span>，合规结论
+       <span class="mono">${esc(data.compliance?.compliance_decision || data.compliance?.decision || "—")}</span>。
+       下方资产配置与执行清单已置灰，<b>不得作为可执行建议使用</b>，需由持牌人员复核后处理。`;
+    byId("sec-alloc").classList.add("dimmed");
+    byId("sec-exec").classList.add("dimmed");
+  } else {
+    halt.style.display = "none";
+    byId("sec-alloc").classList.remove("dimmed");
+    byId("sec-exec").classList.remove("dimmed");
+  }
+
+  // The digest keeps the collapsed header meaningful; folding is the reader's
+  // call now that the rail holds nothing else that needs the height.
+  byId("profile-digest").textContent = profileDigest(collectProfile());
+
+  renderVerdict(data);
+  if (data.allocation) renderAlloc(data.allocation);
+  if (data.execution)  { renderExecution(data.execution); renderExplanation(data.execution.explanation); }
+  if (data.experts)    renderExperts(data.experts);
+  if (data.crosscheck) renderCrosscheck(data.crosscheck);
+  if (data.compliance) renderCompliance(data.compliance);
+  if (data.cost)       renderCost(data.cost);
+
+  setStatus(`完成 — ${STATUS_TEXT[status] || status || "—"}`, issued ? "ok" : "err");
+}
+
+/* ===================================================================== */
+/* Run control                                                           */
+/* ===================================================================== */
+
+function setStatus(msg, kind) {
+  byId("status-text").textContent = msg;
+  byId("statusbar").className = "statusbar" + (kind ? " " + kind : "");
+}
+
+/** One-line restatement of the profile, for the collapsed form header. */
+function profileDigest(p) {
+  return [
+    p.risk_level,
+    (p.investable / 10000).toFixed(0) + "万",
+    p.horizon_years + "年",
+    p.accept_cross_border ? "含港美股" : "仅A股",
+  ].join(" · ");
+}
+
+function collectProfile() {
+  const fd = new FormData(byId("run-form"));
+  return {
+    risk_level: fd.get("risk_level"),
+    investable: parseFloat(fd.get("investable")),
+    horizon_years: parseInt(fd.get("horizon_years"), 10),
+    goals: fd.get("goals").split(",").map((g) => g.trim()).filter(Boolean),
+    liquidity_min: parseFloat(fd.get("liquidity_min")),
+    accept_cross_border: fd.get("accept_cross_border") === "true",
+  };
+}
+
+let activeSource = null;
+let ticker = null;
+
+function streamRun() {
+  if (activeSource) { activeSource.close(); activeSource = null; }
+  const p = collectProfile();
+  const params = new URLSearchParams({
+    risk_level: p.risk_level, investable: p.investable, horizon_years: p.horizon_years,
+    goals: p.goals.join(","), liquidity_min: p.liquidity_min,
+    accept_cross_border: p.accept_cross_border,
+  });
+  setStatus("正在连接…", "running");
+  byId("pipeline-log").innerHTML = "";
+
+  const src = new EventSource(`/workbench/stream?${params}`);
+  activeSource = src;
+
+  // The jury-backed nodes run for tens of seconds and emit nothing until they
+  // finish. Without a ticking elapsed time the page is indistinguishable from a
+  // hung request, so node_start (which fires *before* the node runs) drives a
+  // live row and a clock.
+  let profileDesc = "", currentNode = null, startedAt = 0;
+  const done = [];
+
+  const paint = () => {
+    if (!currentNode) return;
+    const secs = (Date.now() - startedAt) / 1000;
+    setStatus(`运行中 · ${profileDesc} · ${currentNode} ${secs.toFixed(0)}s`, "running");
+    const live = byId("tl-live");
+    if (live) live.querySelector(".tl-v").textContent = secs.toFixed(1) + "s";
+  };
+  if (ticker) clearInterval(ticker);
+  ticker = setInterval(paint, 500);
+  const stop = () => { if (ticker) { clearInterval(ticker); ticker = null; } };
+
+  const repaintLog = () => {
+    const max = Math.max(...done.map((d) => d.latency_s), 0.001);
+    const rows = done.map((d) => `
+      <div class="tl-row">
+        <div class="tl-n">${esc(d.node)}</div>
+        <div class="tl-track"><div class="tl-fill" style="width:${(d.latency_s / max * 100).toFixed(1)}%"></div></div>
+        <div class="tl-v">${d.latency_s.toFixed(3)}s</div>
+      </div>`).join("");
+    const live = currentNode ? `
+      <div class="tl-row tl-live" id="tl-live">
+        <div class="tl-n">${esc(currentNode)}</div>
+        <div class="tl-track"><div class="tl-fill" style="width:100%"></div></div>
+        <div class="tl-v">0.0s</div>
+      </div>` : "";
+    byId("pipeline-log").innerHTML = rows + live;
+  };
+
+  src.addEventListener("start", (e) => {
+    profileDesc = JSON.parse(e.data).profile;
+    setStatus("管线已启动 · " + profileDesc, "running");
+  });
+  src.addEventListener("node_start", (e) => {
+    currentNode = JSON.parse(e.data).node;
+    startedAt = Date.now();
+    repaintLog();
+    paint();
+  });
+  src.addEventListener("node", (e) => {
+    const d = JSON.parse(e.data);
+    if (currentNode) done.push({ node: currentNode, latency_s: (Date.now() - startedAt) / 1000 });
+    currentNode = null;
+    repaintLog();
+  });
+  src.addEventListener("complete", (e) => {
+    stop(); currentNode = null;
+    src.close(); activeSource = null;
+    renderDashboard(JSON.parse(e.data));
+  });
+  src.onerror = () => {
+    stop(); currentNode = null;
+    setStatus("连接中断 — 请重试", "err");
+    src.close(); activeSource = null;
+  };
+}
+
+async function postRun() {
+  setStatus("运行中…", "running");
+  byId("run-btn").disabled = true;
+  byId("stream-btn").disabled = true;
+  try {
+    const res = await fetch("/workbench/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(collectProfile()),
     });
-    byId("stream-btn").addEventListener("click", streamRun);
-  </script>
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    renderDashboard(await res.json());
+  } catch (err) {
+    setStatus("运行失败：" + err.message, "err");
+  } finally {
+    byId("run-btn").disabled = false;
+    byId("stream-btn").disabled = false;
+  }
+}
+
+byId("run-form").addEventListener("submit", (e) => { e.preventDefault(); postRun(); });
+byId("stream-btn").addEventListener("click", streamRun);
+
+// A collapsed <details> makes its inputs unfocusable, and the browser refuses to
+// report a validation error it cannot scroll to. Reopen before it has to.
+byId("run-form").addEventListener("invalid", () => { byId("profile-fold").open = true; }, true);
+</script>
 </body>
 </html>
