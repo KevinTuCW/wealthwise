@@ -1,42 +1,50 @@
-"""AkShare-backed providers for live A/HK/US market data, macro, and FX.
+"""AkShare-backed macro and FX sources — column mappings verified live.
+
+Scope
+-----
+Macro (benchmark rate, CPI) and FX only. Equity quotes moved to
+`tencent_provider.py`: the eastmoney spot endpoints AkShare wraps
+(`stock_zh_a_spot_em` and its HK/US siblings) resolve and complete a TLS
+handshake, then reset mid-stream, and a screener that fails on two calls in
+three inside `equity_node` takes the whole advisory down with it. The AkShare
+equity and fund providers that used to live here were deleted rather than kept
+as a fallback — an uncallable path cannot be calibrated, and an uncalibrated
+fallback is a liability, not a safety net.
+
+Calibration
+-----------
+Every mapping below was checked against akshare 1.18.83 live output on
+2026-09-01 (recorded in `docs/real-data-verification.md`), which is why no
+`TODO(live-calibration)` markers remain. Three of them were wrong:
+
+* `macro_china_cpi` is published **newest-first**, so reading the last row
+  returned the CPI print for January 2008.
+* `macro_china_cpi_yearly` ends with the *scheduled* release, whose 今值 is
+  NaN until the number is out — the snapshot published a NaN CPI on any day
+  between two prints.
+* `currency_boc_sina` has a frozen default date range baked into the signature
+  (`start_date='20230304', end_date='20231110'`), so calling it without dates
+  quoted a 2023 rate as today's.
+
+All three fail silently and produce a plausible-looking number, which is the
+argument for calibrating against live output rather than reasoning about the
+docs. `_newest()` and the freshness guard exist to make them fail loudly if any
+of the three publishers changes its ordering again.
 
 Design:
-- All akshare calls are isolated inside `_get()` so tests can monkeypatch
-  that seam without importing akshare.
-- akshare is lazy-imported inside `_get()` only — never at module top level.
-- `_get()` returns raw list-of-dict / dict payloads (AkShare DataFrames turned
-  into records); the public methods map those into AssetCandidate / dict / float.
-- `build_provider()` is config-gated: returns Sample providers when
-  settings.use_real_providers is False.
-
-AkShare is not installed in the offline dev/test environment, so the exact
-DataFrame column names below cannot be verified live. Every column→field
-mapping is marked `# TODO(live-calibration): verify akshare column names
-against live output` — same pattern shopscout used for its junglescout/spapi
-parse layers. Tests bypass the network entirely by monkeypatching `_get`.
+- All akshare calls are isolated inside `_get()` / `_table()` so tests can
+  monkeypatch that seam without importing akshare.
+- akshare is lazy-imported inside those seams only — never at module top level.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-from wealthwise.agents.state import AssetCandidate
-
-if TYPE_CHECKING:
-    from wealthwise.config import Settings
-
+import math
+import re
+from datetime import date, datetime, timedelta
 
 # ---------------------------------------------------------------------------
-# Market provider
+# Shared parsing helpers
 # ---------------------------------------------------------------------------
-
-# Which AkShare spot function backs each market's full snapshot.
-# TODO(live-calibration): verify these function names exist in the installed
-# akshare version (they are renamed occasionally across releases).
-_MARKET_SPOT_FN = {
-    "A": "stock_zh_a_spot_em",
-    "HK": "stock_hk_spot_em",
-    "US": "stock_us_spot_em",
-}
 
 
 def _to_records(df) -> list[dict]:
@@ -52,169 +60,90 @@ def _to_records(df) -> list[dict]:
     return list(df)  # already record-like (e.g. a test stub)
 
 
-def _map_equity_row(row: dict, market: str) -> dict:
-    """Map one AkShare spot-quote row to AssetCandidate kwargs.
+def _number(value: object) -> float | None:
+    """Parse a published cell as a float, or None if it carries no reading.
 
-    AkShare A-share columns are Chinese ("代码"/"名称"/"市盈率-动态"…); HK/US
-    columns differ again. Each get() falls back through the Chinese label, an
-    English alias, and finally the already-domain-shaped key, so the same
-    mapper survives minor akshare schema drift and pre-shaped fixture rows.
+    NaN counts as no reading. Pandas hands one back for any cell the publisher
+    has not filled in yet, and NaN survives arithmetic silently, so a missing
+    print would otherwise reach the consensus layer as a number and poison the
+    median it lands in.
     """
-    # TODO(live-calibration): verify akshare column names against live output
-    symbol = str(row.get("代码") or row.get("symbol") or "")
-    name = str(row.get("名称") or row.get("name") or "")
-    # TODO(live-calibration): verify akshare column names against live output
-    pe = row.get("市盈率-动态") or row.get("市盈率") or row.get("pe")
-    # TODO(live-calibration): verify akshare column names against live output
-    #   AkShare spot tables carry a daily change pct ("涨跌幅"), not annualized
-    #   vol; real annualized volatility needs a separate history fetch, so it is
-    #   left absent here rather than fabricated.
-    metrics = dict(row.get("metrics") or {})   # honour a pre-shaped metrics bag
-    if pe is not None and "pe" not in metrics:
-        metrics["pe"] = float(pe)
-
-    currency = row.get("currency") or {"A": "CNY", "HK": "HKD", "US": "USD"}[market]
-    return {
-        "symbol": symbol,
-        "market": row.get("market") or market,
-        "asset_class": row.get("asset_class") or "equity",
-        "name": name,
-        "currency": currency,
-        # TODO(live-calibration): AkShare spot tables have no suitability rating;
-        # r_level must be derived downstream (e.g. from volatility). Default R3
-        # is a neutral placeholder until the risk-scoring task fills it.
-        "r_level": row.get("r_level") or "R3",
-        "metrics": metrics,
-        "tags": list(row.get("tags") or []),
-    }
-
-
-class AkShareMarketProvider:
-    """Live market data via AkShare (lazy-imported).
-
-    _get() is the only method that touches akshare; all public methods go
-    through _get() so tests can stub it without importing akshare.
-    """
-
-    def _get(self, symbols: list[str] | None = None,
-             market: str | None = None) -> list[dict]:
-        """Fetch spot-snapshot rows from AkShare, as record dicts.
-
-        When `market` is one of A/HK/US, dispatches to that single spot
-        function. When `market` is None (the quotes path), fetches all three
-        snapshots and tags each row with its market so the mapper can tell them
-        apart. Tests monkeypatch this method, so no akshare import happens then.
-        """
-        import akshare as ak  # lazy — never imported at module top
-
-        targets = [market] if market in _MARKET_SPOT_FN else list(_MARKET_SPOT_FN)
-        out: list[dict] = []
-        for mkt in targets:
-            fn = getattr(ak, _MARKET_SPOT_FN[mkt], None)
-            if fn is None:
-                continue
-            for row in _to_records(fn()):
-                row.setdefault("market", mkt)   # tag origin market for the mapper
-                out.append(row)
-        return out
-
-    def quotes(self, symbols: list[str]) -> list[AssetCandidate]:
-        """Fetch AssetCandidates for the given symbols across A/HK/US snapshots."""
-        wanted = {s.casefold() for s in symbols}
-        out: list[AssetCandidate] = []
-        for row in self._get(symbols=symbols):
-            mapped = _map_equity_row(row, row.get("market", "A"))
-            if mapped["symbol"].casefold() in wanted:
-                out.append(AssetCandidate(**mapped))
-        return out
-
-    def screen(self, market: str, filters: dict) -> list[AssetCandidate]:
-        """Return candidates in `market` matching simple filters.
-
-        Supported filters: asset_class (equity only for spot tables), max_pe.
-        """
-        out: list[AssetCandidate] = []
-        for row in self._get(market=market):
-            mapped = _map_equity_row(row, market)
-            if filters.get("asset_class") and mapped["asset_class"] != filters["asset_class"]:
-                continue
-            pe = mapped["metrics"].get("pe")
-            if "max_pe" in filters and pe is not None and pe > filters["max_pe"]:
-                continue
-            out.append(AssetCandidate(**mapped))
-        return out
-
-
-# ---------------------------------------------------------------------------
-# Fund provider (bond / money-market / QDII)
-# ---------------------------------------------------------------------------
-
-def _map_fund_row(row: dict) -> dict:
-    """Map one AkShare open-fund row to AssetCandidate kwargs."""
-    # TODO(live-calibration): verify akshare column names against live output
-    symbol = str(row.get("基金代码") or row.get("代码") or row.get("symbol") or "")
-    name = str(row.get("基金简称") or row.get("名称") or row.get("name") or "")
-    return {
-        "symbol": symbol,
-        "market": "A",
-        # TODO(live-calibration): AkShare fund lists don't expose a clean
-        # asset_class; classify from name/type downstream. Default "bond".
-        "asset_class": "bond",
-        "name": name,
-        "currency": "CNY",
-        "r_level": "R2",
-        "metrics": {},
-        "tags": [],
-    }
-
-
-class AkShareFundProvider:
-    """Live open-end fund data via AkShare (lazy-imported)."""
-
-    def _get(self) -> list[dict]:
-        """Fetch the open-fund catalogue from AkShare, as record dicts."""
-        import akshare as ak  # lazy
-        # TODO(live-calibration): verify akshare column names against live output
-        #   fund_open_fund_daily_em() is the daily NAV table for open funds;
-        #   fund_name_em() is the fuller name/type catalogue. Pick per need.
-        fn = getattr(ak, "fund_open_fund_daily_em", None) or getattr(ak, "fund_name_em", None)
-        if fn is None:
-            return []
-        return _to_records(fn())
-
-    def quotes(self, symbols: list[str]) -> list[AssetCandidate]:
-        wanted = {s.casefold() for s in symbols}
-        out: list[AssetCandidate] = []
-        for row in self._get():
-            mapped = _map_fund_row(row)
-            if mapped["symbol"].casefold() in wanted:
-                out.append(AssetCandidate(**mapped))
-        return out
-
-    def screen(self, market: str, filters: dict) -> list[AssetCandidate]:
-        out: list[AssetCandidate] = []
-        for row in self._get():
-            mapped = _map_fund_row(row)
-            if market and mapped["market"] != market:
-                continue
-            if filters.get("asset_class") and mapped["asset_class"] != filters["asset_class"]:
-                continue
-            out.append(AssetCandidate(**mapped))
-        return out
-
-
-# ---------------------------------------------------------------------------
-# Macro provider
-# ---------------------------------------------------------------------------
-
-def _percent(value: object) -> float | None:
-    """Turn a published percentage (3.45) into a decimal fraction (0.0345)."""
     if value is None:
         return None
     try:
-        return float(value) / 100.0
+        number = float(value)
     except (TypeError, ValueError):
         return None
+    return None if math.isnan(number) else number
+
+
+def _as_date(value: object) -> date | None:
+    """Parse the several date shapes AkShare macro tables use, or None.
+
+    Seen live: `datetime.date` (LPR, CPI-yearly), `pandas.Timestamp`, and the
+    NBS table's `"2026年07月份"` string.
+    """
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value or "")
+    match = re.search(r"(\d{4})\D+(\d{1,2})(?:\D+(\d{1,2}))?", text)
+    if not match:
+        return None
+    year, month, day = match.group(1), match.group(2), match.group(3)
+    try:
+        return date(int(year), int(month), int(day or 1))
+    except ValueError:
+        return None
+
+
+def _newest(rows: list[dict], date_key: str, value_keys: tuple[str, ...]) -> dict | None:
+    """The most recent row that actually carries one of `value_keys`.
+
+    Two failure modes, one helper. Publishers disagree on ordering — LPR ships
+    oldest-first, the NBS CPI table newest-first — so `rows[-1]` is a coin flip
+    on which end of the history it lands. And a table that lists its next
+    scheduled release ends with a row whose value is NaN, so "most recent row"
+    and "most recent reading" are not the same row. Picking by date, among rows
+    that have a value, is right under both.
+
+    Rows with no parseable date sort last but stay eligible: losing the reading
+    entirely because a publisher renamed its date column would be a worse
+    failure than reading it in file order.
+    """
+    usable = [
+        row for row in rows
+        if any(_number(row.get(k)) is not None for k in value_keys)
+    ]
+    if not usable:
+        return None
+    dated = [(d, row) for row in usable if (d := _as_date(row.get(date_key)))]
+    if not dated:
+        return usable[-1]
+    return max(dated, key=lambda pair: pair[0])[1]
+
+
+# ---------------------------------------------------------------------------
+# Macro sources
+# ---------------------------------------------------------------------------
+
+
+# How old a macro print may be before the source declines to publish it.
+#
+# Both series here are monthly, and the NBS table is labelled by the month it
+# describes rather than the day it was released, so the label already lags
+# publication by around six weeks. A hundred days leaves roughly two cycles of
+# headroom for a late release, and still catches a feed that has stopped: the
+# jin10-backed `macro_china_cpi_yearly` last printed in September 2025 and
+# hands that reading back as though it were current.
+#
+# This is the failure mode a consensus layer is least able to catch by itself.
+# Two publishers a year apart do not look like a disagreement — a 0.0% reading
+# from August 2025 and a 0.5% reading from July 2026 are both plausible CPI
+# prints, so the resolver reconciles them into a narrow spread and reports high
+# confidence in a number that describes no month at all.
+_MACRO_MAX_STALENESS_DAYS = 100
 
 
 class _AkShareMacroSource:
@@ -227,13 +156,20 @@ class _AkShareMacroSource:
     endpoint is what lets `ConsensusMacroProvider` see two independent CPI
     readings and report the spread between them.
 
-    Subclasses implement `_get()`, the only method that touches akshare, so
-    tests can stub it without importing akshare.
+    Subclasses declare which table they read and which column carries the
+    number; `_table()` is the only method that touches akshare, so tests can
+    stub it without importing akshare.
     """
 
     name = "akshare"
     #: akshare callables tried in order; the first one present is used.
     functions: tuple[str, ...] = ()
+    #: Snapshot key this source fills in.
+    field: str = ""
+    #: Column carrying the print date, used for both ordering and freshness.
+    date_key: str = ""
+    #: Columns carrying the reading, most preferred first.
+    value_keys: tuple[str, ...] = ()
 
     def _table(self) -> list[dict]:
         """Return the endpoint's rows, or [] when the function is unavailable."""
@@ -245,42 +181,67 @@ class _AkShareMacroSource:
                 return _to_records(fn())
         return []
 
+    def _convert(self, raw: float) -> float | None:
+        """Turn the published cell into a decimal fraction."""
+        return raw / 100.0
+
     def _get(self) -> dict:
-        raise NotImplementedError
+        row = _newest(self._table(), self.date_key, self.value_keys)
+        if row is None:
+            return {}
+
+        as_of = _as_date(row.get(self.date_key))
+        if as_of and (date.today() - as_of).days > _MACRO_MAX_STALENESS_DAYS:
+            return {}          # a stopped feed reports nothing, not its last word
+
+        raw = next(
+            (v for k in self.value_keys if (v := _number(row.get(k))) is not None),
+            None,
+        )
+        if raw is None:
+            return {}
+        value = self._convert(raw)
+        return {self.field: value} if value is not None else {}
 
     def snapshot(self) -> dict:
         return self._get()
 
 
 class AkShareLprSource(_AkShareMacroSource):
-    """Benchmark lending rate from the LPR table (verified live: TRADE_DATE/LPR1Y)."""
+    """Benchmark lending rate — the 1-year LPR.
+
+    Live 2026-09-01: columns `TRADE_DATE / LPR1Y / LPR5Y / RATE_1 / RATE_2`,
+    1575 rows oldest-first, latest print 2026-08-20 at LPR1Y = 3.00.
+    """
 
     name = "akshare-lpr"
     functions = ("macro_china_lpr",)
-
-    def _get(self) -> dict:
-        rows = self._table()
-        if not rows:
-            return {}
-        last = rows[-1]
-        rate = _percent(last.get("LPR1Y") or last.get("1年") or last.get("lpr_1y"))
-        return {"interest_rate": rate} if rate is not None else {}
+    field = "interest_rate"
+    date_key = "TRADE_DATE"
+    value_keys = ("LPR1Y", "1年", "lpr_1y")
 
 
 class AkShareCpiYearlySource(_AkShareMacroSource):
-    """CPI year-on-year as republished by the market-data aggregator table."""
+    """CPI year-on-year as republished by the market-data aggregator table.
+
+    Live 2026-09-01: columns `商品 / 日期 / 今值 / 预测值 / 前值`, oldest-first,
+    and the final row is the *next scheduled* release with 今值 = NaN — so the
+    last row and the last reading are not the same row.
+
+    That table is also **not currently publishing**: its last actual print is
+    2025-08-09, a year behind the statistics bureau, and every other jin10-backed
+    series in this akshare version stops within days of the same date. The
+    mapping below is correct and this source still returns nothing today — that
+    is the freshness guard working, not a bug. CPI therefore reconciles from one
+    publisher and is reported at confidence 0.5: the honest reading, and visible
+    in the consensus record rather than hidden inside a false agreement.
+    """
 
     name = "akshare-cpi-yearly"
     functions = ("macro_china_cpi_yearly",)
-
-    def _get(self) -> dict:
-        rows = self._table()
-        if not rows:
-            return {}
-        last = rows[-1]
-        # TODO(live-calibration): verify akshare column names against live output
-        cpi = _percent(last.get("今值") or last.get("value") or last.get("cpi"))
-        return {"cpi": cpi} if cpi is not None else {}
+    field = "cpi"
+    date_key = "日期"
+    value_keys = ("今值", "value", "cpi")
 
 
 class AkShareCpiNbsSource(_AkShareMacroSource):
@@ -290,26 +251,29 @@ class AkShareCpiNbsSource(_AkShareMacroSource):
     a different column of the same one. Two readings drawn from a single table
     would agree by construction, and a consensus that cannot disagree is
     decoration.
+
+    Live 2026-09-01: 223 rows **newest-first** (`月份` = "2026年07月份" at row 0,
+    "2008年01月份" at the end), `全国-同比增长` = 0.5 for July 2026. Reading the
+    last row — which is what this source used to do — published the January 2008
+    print, 0.5% and 7.1% being equally plausible-looking numbers.
     """
 
     name = "akshare-cpi-nbs"
     functions = ("macro_china_cpi",)
+    field = "cpi"
+    date_key = "月份"
+    value_keys = ("全国-同比增长", "同比增长", "全国-当月")
 
-    def _get(self) -> dict:
-        rows = self._table()
-        if not rows:
-            return {}
-        last = rows[-1]
-        # TODO(live-calibration): verify akshare column names against live output
-        #   The NBS table quotes the index as "last year = 100", so 102.1 means
-        #   +2.1% YoY; the aggregator table quotes the change itself.
-        raw = last.get("全国-同比增长") or last.get("同比增长") or last.get("全国-当月")
-        cpi = _percent(raw)
-        if cpi is None:
-            return {}
-        if cpi > 0.5:                       # index form (102.1) rather than a rate
-            cpi -= 1.0
-        return {"cpi": cpi}
+    def _convert(self, raw: float) -> float | None:
+        """Convert, allowing for the two forms this table publishes.
+
+        `全国-同比增长` quotes the change itself (0.5 → +0.5%); the fallback
+        column `全国-当月` quotes the index on "last year = 100" (100.5 → +0.5%).
+        As fractions the two forms are two orders of magnitude apart, so which
+        one was read is recoverable from the value.
+        """
+        cpi = raw / 100.0
+        return cpi - 1.0 if cpi > 0.5 else cpi
 
 
 class AkShareMacroProvider:
@@ -352,74 +316,70 @@ def build_macro_sources() -> list[_AkShareMacroSource]:
 # ---------------------------------------------------------------------------
 
 # AkShare currency_boc_sina uses Chinese currency names; map our pair codes.
-# TODO(live-calibration): verify akshare column names against live output
+# Verified live 2026-09-01: 美元 → 中行折算价 678.09, 港币 → 91.93 (per 100 units).
 _FX_PAIR_TO_BOC = {
     "USDCNH": "美元",
     "HKDCNH": "港币",
 }
 
+# How far back to ask for. The table only carries business days, and a long
+# weekend plus a holiday clears a week, so a fortnight is the smallest window
+# that reliably contains a print.
+_FX_LOOKBACK_DAYS = 21
+
+# A rate older than this is refused rather than returned. The endpoint's default
+# date range is hard-coded in its signature and ends in November 2023, so the
+# original no-arguments call did not fail — it quoted a two-and-a-half-year-old
+# rate with a straight face. A stale FX rate is worse than a missing one:
+# missing is visible, stale is not.
+_FX_MAX_STALENESS_DAYS = 10
+
 
 class AkShareFXProvider:
-    """Live FX rates via AkShare (lazy-imported)."""
+    """Live BOC middle rates via AkShare (lazy-imported).
+
+    Columns verified live 2026-09-01: `日期 / 中行汇买价 / 中行钞买价 /
+    中行钞卖价/汇卖价 / 央行中间价 / 中行折算价`, quoted per **100** units of
+    foreign currency, oldest-first.
+    """
+
+    name = "akshare-boc-fx"
 
     def _get(self, pair: str) -> list[dict]:
-        """Fetch the BOC spot history for the currency behind `pair`."""
+        """Fetch a recent BOC spot window for the currency behind `pair`."""
         import akshare as ak  # lazy
 
         symbol = _FX_PAIR_TO_BOC.get(pair.upper())
         if symbol is None:
             return []
-        # TODO(live-calibration): verify akshare column names against live output
-        #   currency_boc_sina(symbol=…) returns a dated middle-rate history;
-        #   fx_spot_quote() is the alternative interbank quote table.
         fn = getattr(ak, "currency_boc_sina", None)
         if fn is None:
             return []
-        return _to_records(fn(symbol=symbol))
+        today = date.today()
+        start = today - timedelta(days=_FX_LOOKBACK_DAYS)
+        # The date arguments are not optional in practice: their defaults are
+        # frozen constants in the signature, not "latest".
+        return _to_records(fn(
+            symbol=symbol,
+            start_date=start.strftime("%Y%m%d"),
+            end_date=today.strftime("%Y%m%d"),
+        ))
 
     def rate(self, pair: str) -> float:
         rows = self._get(pair)
-        if not rows:
+        last = _newest(rows, "日期", ("中行折算价", "中行汇买价", "value"))
+        if last is None:
             raise KeyError(f"FX pair {pair!r} not available from akshare")
-        last = rows[-1]
-        # TODO(live-calibration): verify akshare column names against live output
-        #   BOC quotes middle rate per 100 units of foreign currency ("中行折算价"),
-        #   so divide by 100 to get CNY-per-unit.
-        mid = last.get("中行折算价") or last.get("中行汇买价") or last.get("value")
+
+        as_of = _as_date(last.get("日期"))
+        if as_of and (date.today() - as_of).days > _FX_MAX_STALENESS_DAYS:
+            raise KeyError(f"stale FX quote for {pair!r}: last print {as_of}")
+
+        mid = next(
+            (v for k in ("中行折算价", "中行汇买价", "value")
+             if (v := _number(last.get(k))) is not None),
+            None,
+        )
         if mid is None:
             raise KeyError(f"no rate column in akshare payload for {pair!r}")
-        return float(mid) / 100.0
-
-
-# ---------------------------------------------------------------------------
-# Config-gated factory
-# ---------------------------------------------------------------------------
-
-def build_provider(settings: "Settings") -> tuple[
-    "AkShareMarketProvider | object",
-    "AkShareMacroProvider | object",
-    "AkShareFXProvider | object",
-]:
-    """Return (market, macro, fx) providers gated on settings.use_real_providers.
-
-    When use_real_providers is False (the default), returns offline Sample
-    providers so the pipeline works without any API keys or akshare install.
-    """
-    if settings.use_real_providers:
-        return (
-            AkShareMarketProvider(),
-            AkShareMacroProvider(),
-            AkShareFXProvider(),
-        )
-
-    from wealthwise.providers.sample import (
-        SampleFXProvider,
-        SampleMacroProvider,
-        SampleMarketProvider,
-    )
-    data_dir = settings.sample_data_dir
-    return (
-        SampleMarketProvider(data_dir),
-        SampleMacroProvider(data_dir),
-        SampleFXProvider(data_dir),
-    )
+        return mid / 100.0            # quoted per 100 units of foreign currency

@@ -191,7 +191,7 @@ class TestHistoryMetrics:
 
         closes = [100.0 + i * 0.5 for i in range(70)]
         provider = TencentHistoryProvider()
-        provider.closes = lambda pairs: {"600519": closes}      # type: ignore[assignment]
+        provider.closes = lambda pairs, venues=None: {"600519": closes}   # type: ignore[assignment]
 
         got = provider.enrich([_candidate("600519")])[0]
         assert got.metrics["volatility"] > 0
@@ -202,7 +202,7 @@ class TestHistoryMetrics:
         from wealthwise.providers.history import TencentHistoryProvider
 
         provider = TencentHistoryProvider()
-        provider.closes = lambda pairs: {}                       # type: ignore[assignment]
+        provider.closes = lambda pairs, venues=None: {}          # type: ignore[assignment]
 
         original = _candidate("600519", pe=20.0)
         got = provider.enrich([original])[0]
@@ -224,3 +224,49 @@ class TestHistoryMetrics:
         got = provider.closes([("600519", "A"), ("000858", "A")])
         assert "600519" not in got
         assert len(got["000858"]) == 40
+
+    def test_美股按报价带回的交易所后缀取K线(self):
+        """`usAAPL` answers with a two-bar stub; only `usAAPL.OQ` returns a series."""
+        from wealthwise.providers.history import TencentHistoryProvider
+
+        asked: list[str] = []
+
+        def fake_get(prefixed):
+            asked.append(prefixed)
+            bars = 40 if "." in prefixed else 2
+            return json.dumps({"data": {prefixed: {"qfqday": [
+                ["d", "1", str(100 + i), "1", "1", "1"] for i in range(bars)
+            ]}}})
+
+        provider = TencentHistoryProvider(workers=1)
+        provider._get = fake_get                                 # type: ignore[assignment]
+
+        got = provider.closes([("AAPL", "US")], {"AAPL": "AAPL.OQ"})
+        assert asked == ["usAAPL.OQ"]
+        assert len(got["AAPL"]) == 40
+
+    def test_没有后缀时逐个交易所试(self):
+        """A stub series is not an error, so a bare ticker has to be retried."""
+        from wealthwise.providers.history import TencentHistoryProvider
+
+        def fake_get(prefixed):
+            bars = 40 if prefixed.endswith(".N") else 2
+            return json.dumps({"data": {prefixed: {"qfqday": [
+                ["d", "1", str(100 + i), "1", "1", "1"] for i in range(bars)
+            ]}}})
+
+        provider = TencentHistoryProvider(workers=1)
+        provider._get = fake_get                                 # type: ignore[assignment]
+
+        got = provider.closes([("JPM", "US")])
+        assert len(got["JPM"]) == 40
+
+    def test_美股行情把交易所后缀带进metrics(self):
+        """The suffix has to survive the quote mapper for enrich() to use it."""
+        from wealthwise.providers.tencent_provider import _parse
+
+        fields = [""] * 71
+        fields[1], fields[2], fields[3], fields[39] = "苹果", "AAPL.OQ", "305.59", "35.04"
+        rows = _parse('v_usAAPL="' + "~".join(fields) + '";')
+        assert rows[0]["symbol"] == "AAPL"                 # ticker still bare
+        assert rows[0]["metrics"]["venue_code"] == "AAPL.OQ"

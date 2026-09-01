@@ -168,7 +168,7 @@ def build_runtime_deps(settings: Settings | None = None) -> AdvisoryDeps:
         return build_sample_deps(s)
 
     from wealthwise.crosscheck.jury import build_jury_clients
-    from wealthwise.providers.akshare_provider import build_macro_sources
+    from wealthwise.providers.akshare_provider import AkShareFXProvider, build_macro_sources
     from wealthwise.providers.history import TencentHistoryProvider
     from wealthwise.providers.sina_provider import SinaMarketProvider
     from wealthwise.providers.tencent_provider import TencentMarketProvider
@@ -202,7 +202,11 @@ def build_runtime_deps(settings: Settings | None = None) -> AdvisoryDeps:
             *build_macro_sources(),
             QualitativeMacroSource(SampleMacroProvider(data_dir), name="sample-views"),
         ]),
-        fx=SampleFXProvider(data_dir),         # AkShare FX not yet wired
+        # BOC middle rates, calibrated live. It raises rather than returning a
+        # stale quote, which is the behaviour worth having here: FX only enters
+        # the plan as a currency label today, so a loud failure costs nothing,
+        # and the day it prices a conversion a silent 2023 rate would cost a lot.
+        fx=AkShareFXProvider(),
         history=TencentHistoryProvider(universe),
         jury_clients=build_jury_clients(s),
         policy_retriever=load_policy_retriever(data_dir, base_embedder_offline),

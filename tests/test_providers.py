@@ -157,97 +157,161 @@ class TestSampleFXProvider:
 
 
 # ---------------------------------------------------------------------------
-# build_provider factory
+# AkShare macro sources — the live-calibration regressions
+#
+# Each fixture below is the shape the live table actually returned on
+# 2026-09-01, trimmed to the columns the source reads. All three sources used to
+# take `rows[-1]`, which is correct for exactly one of the three publishers.
 # ---------------------------------------------------------------------------
 
-class TestBuildProvider:
-    def test_returns_sample_providers_when_use_real_providers_false(self):
-        from wealthwise.providers.akshare_provider import build_provider
-        from wealthwise.providers.sample import SampleMarketProvider, SampleMacroProvider, SampleFXProvider
-        from wealthwise.config import Settings
-
-        s = Settings(use_real_providers=False, sample_data_dir=str(SAMPLES))
-        market, macro, fx = build_provider(s)
-        assert isinstance(market, SampleMarketProvider)
-        assert isinstance(macro, SampleMacroProvider)
-        assert isinstance(fx, SampleFXProvider)
-
-    def test_returns_akshare_provider_when_use_real_providers_true(self):
-        from wealthwise.providers.akshare_provider import build_provider, AkShareMarketProvider
-        from wealthwise.config import Settings
-
-        s = Settings(use_real_providers=True, sample_data_dir=str(SAMPLES))
-        market, macro, fx = build_provider(s)
-        assert isinstance(market, AkShareMarketProvider)
+def _stub_table(source, rows):
+    """Replace the akshare seam on one macro source instance."""
+    source._table = lambda: rows
+    return source
 
 
-# ---------------------------------------------------------------------------
-# AkShareMarketProvider — _get seam stub (no real akshare import)
-# ---------------------------------------------------------------------------
+def _ago(days: int):
+    """A date `days` before today.
 
-class TestAkShareMarketProviderStubbed:
-    def test_quotes_maps_stubbed_payload_to_asset_candidates(self, monkeypatch):
-        """Provider maps _get stub payload into AssetCandidate without importing akshare."""
-        from wealthwise.providers.akshare_provider import AkShareMarketProvider
-        from wealthwise.agents.state import AssetCandidate
+    Fixtures are anchored to the clock rather than to 2026-09-01 on purpose: the
+    sources now refuse a stale print, so hard-coded dates would turn these tests
+    into a time bomb that passes today and fails next quarter.
+    """
+    import datetime
 
-        provider = AkShareMarketProvider()
+    return datetime.date.today() - datetime.timedelta(days=days)
 
-        # Stub _get so no network / no akshare needed
-        stub_payload = [
-            {
-                "symbol": "600519",
-                "market": "A",
-                "name": "贵州茅台",
-                "currency": "CNY",
-                "asset_class": "equity",
-                "r_level": "R3",
-                "metrics": {"pe": 28.5, "volatility": 0.22},
-                "tags": ["白酒", "消费"],
-            }
+
+def _month_label(days_ago: int) -> str:
+    """The NBS table's `"2026年07月份"` month label, `days_ago` behind today."""
+    d = _ago(days_ago)
+    return f"{d.year}年{d.month:02d}月份"
+
+
+class TestAkShareMacroSources:
+    def test_lpr_reads_the_latest_print(self):
+        from wealthwise.providers.akshare_provider import AkShareLprSource
+
+        rows = [                                  # published oldest-first
+            {"TRADE_DATE": _ago(43), "LPR1Y": 3.1, "LPR5Y": 3.6},
+            {"TRADE_DATE": _ago(12), "LPR1Y": 3.0, "LPR5Y": 3.5},
         ]
-        monkeypatch.setattr(provider, "_get", lambda *args, **kwargs: stub_payload)
+        assert _stub_table(AkShareLprSource(), rows).snapshot() == {"interest_rate": 0.03}
 
-        results = provider.quotes(["600519"])
-        assert len(results) == 1
-        c = results[0]
-        assert isinstance(c, AssetCandidate)
-        assert c.symbol == "600519"
-        assert c.market == "A"
-        assert c.asset_class == "equity"
-        assert c.r_level == "R3"
-        assert c.metrics["pe"] == 28.5
+    def test_cpi_yearly_skips_the_unreleased_scheduled_row(self):
+        """The aggregator table ends with the *next* release, whose 今值 is NaN."""
+        from wealthwise.providers.akshare_provider import AkShareCpiYearlySource
 
-    def test_screen_maps_stubbed_payload(self, monkeypatch):
-        from wealthwise.providers.akshare_provider import AkShareMarketProvider
-        from wealthwise.agents.state import AssetCandidate
-
-        provider = AkShareMarketProvider()
-
-        stub_payload = [
-            {
-                "symbol": "AAPL",
-                "market": "US",
-                "name": "Apple Inc.",
-                "currency": "USD",
-                "asset_class": "equity",
-                "r_level": "R4",
-                "metrics": {"pe": 30.0, "volatility": 0.25},
-                "tags": ["科技"],
-            }
+        rows = [
+            {"日期": _ago(53), "今值": 0.1},
+            {"日期": _ago(22), "今值": 0.4},
+            {"日期": _ago(-9), "今值": float("nan")},      # scheduled, not yet out
         ]
-        monkeypatch.setattr(provider, "_get", lambda *args, **kwargs: stub_payload)
+        snap = _stub_table(AkShareCpiYearlySource(), rows).snapshot()
+        assert snap["cpi"] == pytest.approx(0.004)   # the last print, not a NaN
 
-        results = provider.screen("US", {})
-        assert len(results) == 1
-        assert isinstance(results[0], AssetCandidate)
-        assert results[0].market == "US"
+    def test_cpi_nbs_reads_a_newest_first_table(self):
+        """`macro_china_cpi` is published newest-first; rows[-1] is January 2008."""
+        from wealthwise.providers.akshare_provider import AkShareCpiNbsSource
 
+        rows = [
+            {"月份": _month_label(40), "全国-当月": 100.5, "全国-同比增长": 0.5},
+            {"月份": _month_label(70), "全国-当月": 101.0, "全国-同比增长": 1.0},
+            {"月份": "2008年01月份", "全国-当月": 107.0781, "全国-同比增长": 7.0781},
+        ]
+        snap = _stub_table(AkShareCpiNbsSource(), rows).snapshot()
+        assert snap["cpi"] == pytest.approx(0.005)
+
+    def test_cpi_nbs_converts_the_index_form_fallback_column(self):
+        """`全国-当月` quotes "last year = 100"; 100.5 is +0.5%, not +100.5%."""
+        from wealthwise.providers.akshare_provider import AkShareCpiNbsSource
+
+        rows = [{"月份": _month_label(40), "全国-当月": 100.5}]
+        snap = _stub_table(AkShareCpiNbsSource(), rows).snapshot()
+        assert snap["cpi"] == pytest.approx(0.005)
+
+    def test_a_feed_that_stopped_publishing_reports_nothing(self):
+        """The live aggregator CPI table last printed a year ago and says so
+        with a straight face; a year-old print must not enter the consensus."""
+        from wealthwise.providers.akshare_provider import AkShareCpiYearlySource
+
+        rows = [{"日期": _ago(365), "今值": 0.0}]
+        assert _stub_table(AkShareCpiYearlySource(), rows).snapshot() == {}
+
+    def test_a_recent_print_is_published(self):
+        """The guard must not be so tight that a normal monthly cadence trips it."""
+        from wealthwise.providers.akshare_provider import AkShareCpiYearlySource
+
+        rows = [{"日期": _ago(30), "今值": 0.4}]
+        snap = _stub_table(AkShareCpiYearlySource(), rows).snapshot()
+        assert snap["cpi"] == pytest.approx(0.004)
+
+    def test_empty_table_publishes_no_reading(self):
+        """A source with nothing to say must say nothing, not zero."""
+        from wealthwise.providers.akshare_provider import (
+            AkShareCpiNbsSource,
+            AkShareCpiYearlySource,
+            AkShareLprSource,
+        )
+
+        for cls in (AkShareLprSource, AkShareCpiYearlySource, AkShareCpiNbsSource):
+            assert _stub_table(cls(), []).snapshot() == {}
+
+    def test_build_macro_sources_gives_two_independent_cpi_publishers(self):
+        from wealthwise.providers.akshare_provider import build_macro_sources
+
+        names = [s.name for s in build_macro_sources()]
+        assert names == ["akshare-lpr", "akshare-cpi-yearly", "akshare-cpi-nbs"]
+
+
+# ---------------------------------------------------------------------------
+# AkShareFXProvider — BOC middle rate
+# ---------------------------------------------------------------------------
+
+class TestAkShareFXProvider:
+    def _rows(self, days_old: int):
+        import datetime
+
+        as_of = datetime.date.today() - datetime.timedelta(days=days_old)
+        return [{"日期": as_of, "中行汇买价": 671.03, "中行折算价": 678.09}]
+
+    def test_rate_divides_the_per_100_quote(self, monkeypatch):
+        from wealthwise.providers.akshare_provider import AkShareFXProvider
+
+        p = AkShareFXProvider()
+        monkeypatch.setattr(p, "_get", lambda pair: self._rows(1))
+        assert p.rate("USDCNH") == pytest.approx(6.7809)
+
+    def test_stale_quote_raises_rather_than_being_returned(self, monkeypatch):
+        """The endpoint's default date range is frozen in 2023; silence is safer."""
+        from wealthwise.providers.akshare_provider import AkShareFXProvider
+
+        p = AkShareFXProvider()
+        monkeypatch.setattr(p, "_get", lambda pair: self._rows(900))
+        with pytest.raises(KeyError, match="stale"):
+            p.rate("USDCNH")
+
+    def test_unknown_pair_raises(self, monkeypatch):
+        from wealthwise.providers.akshare_provider import AkShareFXProvider
+
+        p = AkShareFXProvider()
+        monkeypatch.setattr(p, "_get", lambda pair: [])
+        with pytest.raises(KeyError):
+            p.rate("EURJPY")
+
+    def test_satisfies_fx_provider_protocol(self):
+        from wealthwise.providers.akshare_provider import AkShareFXProvider
+        from wealthwise.providers.base import FXProvider
+
+        assert isinstance(AkShareFXProvider(), FXProvider)
+
+
+class TestAkShareIsLazy:
     def test_akshare_not_imported_at_module_level(self):
-        """Importing akshare_provider must NOT trigger an akshare import."""
+        """Importing the provider must not pull akshare into the test process."""
         import sys
-        # If akshare were imported at module top, it'd be in sys.modules after import
-        # We just assert the provider module loaded fine without it
+        import wealthwise.providers.akshare_provider  # noqa: F401
+
         assert "wealthwise.providers.akshare_provider" in sys.modules
         assert "akshare" not in sys.modules
 

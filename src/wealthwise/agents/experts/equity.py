@@ -12,7 +12,8 @@ Ranking runs one of two ways, chosen by `deps.enable_factor_scoring`:
   `portfolio/factors.py`, fed by daily history when a `HistoryProvider` is
   wired. Both paths run through the same quota and the same guardrails; only the
   sort key differs, which keeps the switch honest — it changes which names are
-  picked, never how many or from where.
+  picked, never how many or from where. That symmetry is also what made the two
+  comparable in `docs/factor-backtest.md`, where the composite lost.
 """
 from __future__ import annotations
 
@@ -86,9 +87,10 @@ def _quality_key(candidate: AssetCandidate) -> tuple:
 
     Size stands in for liquidity and stability, which is what suitability
     actually cares about — not for expected return. This rule commits to nothing
-    it cannot defend from two fields, which is why it remains the default and the
-    fallback: `portfolio/factors.py` ranks on more, but on weights that are a
-    house view rather than a validated one.
+    it cannot defend from two fields, and it stays the default because the
+    alternative was measured and did not beat it: over 34 monthly rebalances of
+    this repo's universe the five-factor composite picked a book returning 4bp a
+    month *less* (t = −0.09). See `docs/factor-backtest.md`.
 
     Names with no reported size sort last rather than being dropped, so a
     thin-data provider degrades to "quota respected, order arbitrary" instead of

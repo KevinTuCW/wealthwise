@@ -6,10 +6,21 @@ Selection used to be "largest market cap first, cheaper P/E breaks ties". That
 rule was defended in `equity.py` on the grounds that the available fields could
 not support a factor model and that an unvalidated scoring formula is worse than
 a legible one. The first half of that has stopped being true — daily history now
-supplies momentum and realized volatility (see `providers/history.py`) — and the
-second half is why this module is off unless `ENABLE_FACTOR_SCORING` says
-otherwise, and why every weight below is labelled as a house view rather than as
-a backtested result.
+supplies momentum and realized volatility (see `providers/history.py`).
+
+The second half has now been measured rather than asserted. `scripts/
+backtest_factors.py` runs these exact weights over 34 monthly rebalances of this
+repo's own 872-name universe (`docs/factor-backtest.md`): the composite picks a
+book returning **−4bp a month against the rule it would replace, t = −0.09**.
+Positive rank IC across the full cross-section, and nothing left of it once the
+quota and the size floor cut the list to the top fifty. So `ENABLE_FACTOR_SCORING`
+stays **off by default** — no longer because the formula is unmeasured, but
+because it was measured and did not win.
+
+The weights below are unchanged from the house view, deliberately. Re-fitting
+them on the same 34 dates would produce whichever mix best explains this sample
+and would tell us nothing about the next one; the backtest is allowed to reject
+the default, not to author a replacement.
 
 The five factors
 ----------------
@@ -58,10 +69,30 @@ from dataclasses import dataclass, field
 
 from wealthwise.agents.state import AssetCandidate
 
-# House-view weights. Not backtested — deliberately close to equal, tilted a
-# little toward the two factors with the strongest and longest-documented
-# evidence, and away from the two that are here for tradability rather than
-# return.
+# House-view weights: close to equal, tilted toward the two factors with the
+# longest-documented evidence in the literature and away from the two that are
+# here for tradability rather than return.
+#
+# Measured on this universe (`docs/factor-backtest.md`), the literature and the
+# candidate pool disagree in three places, and the numbers are recorded here so
+# the next person to touch this dict starts from them:
+#
+#   value      the only factor positive in all three markets (+0.06 / +0.18 /
+#              +0.07 mean rank IC) — and the one whose backtest carries
+#              look-ahead bias, since past P/E is reconstructed from today's
+#              earnings. Read it as an upper bound.
+#   momentum   negative in all three markets on this pool. Its 25% is the least
+#              defensible number in this dict; dropping it is the one change the
+#              evidence points at, and it needs dates this backtest has not seen
+#              before it earns the edit.
+#   size       significantly negative in A-shares (t = −2.11) and positive in
+#              HK/US. Nothing to fix: the tilt to large caps is there for
+#              suitability and liquidity, and the A-share reading is what that
+#              choice costs, now quantified rather than assumed.
+#   low_vol    carries HK (+0.13), flat in A, negative in US.
+#   liquidity  no signal anywhere, and no data at all in HK — the quote feed
+#              reports 0 in that field, so a fifth of the book is scored on four
+#              factors whatever this weight says.
 FACTOR_WEIGHTS: dict[str, float] = {
     "value": 0.25,
     "momentum": 0.25,

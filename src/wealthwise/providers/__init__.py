@@ -1,7 +1,7 @@
 """Data-provider layer public API.
 
-Import the Protocols and the factory here so callers only need:
-    from wealthwise.providers import MarketProvider, build_provider
+Import the Protocols and the shared building blocks here so callers only need:
+    from wealthwise.providers import MarketProvider, ConsensusMarketProvider
 
 Live providers that pull network dependencies (Tencent, Sina, AkShare, k-line
 history) are deliberately absent: importing this package must stay free of

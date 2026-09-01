@@ -2,9 +2,24 @@
 
 Every advisory run surfaced through the API is appended as an audit record
 (profile summary, decision, portfolio risk level, status, spend).
-Default is in-memory (diskless — tests and eval stay clean); set
-RUN_STORE=sqlite for durable, restart-surviving audit with zero extra
-dependencies (stdlib sqlite3). Postgres is reserved.
+
+Three backends, chosen by `RUN_STORE`:
+
+``memory``
+    Default. Diskless, so tests and eval leave nothing behind.
+``sqlite``
+    Durable and restart-surviving with zero extra dependencies (stdlib
+    sqlite3). One writer, one file — right up to the point the app runs as
+    more than one process.
+``postgres``
+    The multi-process answer. Two uvicorn workers against one SQLite file
+    serialise on a write lock and, on a network filesystem, corrupt it; an
+    audit log that cannot be written concurrently is the wrong shape for the
+    thing it is auditing. Needs `psycopg` (`pip install -e '.[pg]'`) and
+    `RUN_STORE_DSN`.
+
+All three implement the same `RunStore` protocol and the same append-only
+semantics, so the backend is a deployment decision rather than a code one.
 """
 import json
 import sqlite3
@@ -159,17 +174,131 @@ class SqliteRunStore:
         )
 
 
+class PostgresRunStore:
+    """Durable append-only audit log backed by Postgres via psycopg 3.
+
+    A connection is opened per operation rather than pooled. The store is
+    written once per advisory run — a run that costs seconds of model latency —
+    so the few milliseconds of connect are invisible next to it, and not holding
+    a long-lived socket means a database restart heals by itself instead of
+    leaving every worker holding a dead handle.
+
+    `dashboard_json` is stored as TEXT, not JSONB, which looks like leaving the
+    native type on the table. It is the point: JSONB normalises whitespace,
+    reorders keys and drops duplicates, so what came back out would no longer be
+    the bytes that were served to the investor. An audit record that has been
+    helpfully tidied is not evidence. Indexing on the JSON is not a use case
+    here — `/runs` reads by primary key and by recency, both of which are
+    columns.
+    """
+
+    #: Same column list and order as the SQLite store, so a record written by
+    #: one backend reads identically from the other.
+    _DDL = """
+        CREATE TABLE IF NOT EXISTS runs(
+            run_id            TEXT PRIMARY KEY,
+            created_at        TIMESTAMPTZ NOT NULL,
+            profile_summary   TEXT,
+            status            TEXT,
+            decision          TEXT,
+            portfolio_r_level TEXT,
+            tokens_used       INTEGER,
+            cost_usd          DOUBLE PRECISION,
+            dashboard_json    TEXT
+        )
+    """
+
+    # `list()` is always "most recent N", and created_at is not the primary key,
+    # so without this the common read degrades to a full scan plus a sort as the
+    # log grows — which is exactly what an append-only table does.
+    _INDEX = "CREATE INDEX IF NOT EXISTS runs_created_at_idx ON runs(created_at DESC)"
+
+    def __init__(self, dsn: str) -> None:
+        if not dsn:
+            raise ValueError("RUN_STORE=postgres requires RUN_STORE_DSN")
+        self._dsn = dsn
+        with self._conn() as c, c.cursor() as cur:
+            cur.execute(self._DDL)
+            cur.execute(self._INDEX)
+
+    def _conn(self):
+        """Open a connection. psycopg is imported lazily — it is an extra."""
+        import psycopg  # lazy: `pip install -e '.[pg]'`, not a base dependency
+
+        return psycopg.connect(self._dsn)
+
+    def save(self, record: RunRecord) -> str:
+        with self._conn() as c, c.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO runs({','.join(_COLUMNS)}) "
+                f"VALUES({','.join(['%s'] * len(_COLUMNS))})",
+                (
+                    record.run_id,
+                    record.created_at,
+                    record.profile_summary,
+                    record.status,
+                    record.decision,
+                    record.portfolio_r_level,
+                    record.tokens_used,
+                    record.cost_usd,
+                    record.dashboard_json,
+                ),
+            )
+        return record.run_id
+
+    def list(self, limit: int = 50) -> list[RunRecord]:
+        with self._conn() as c, c.cursor() as cur:
+            cur.execute(
+                f"SELECT {','.join(_COLUMNS)} FROM runs "
+                f"ORDER BY created_at DESC LIMIT %s",
+                (limit,),
+            )
+            rows = cur.fetchall()
+        return [self._row(r) for r in rows]
+
+    def get(self, run_id: str) -> RunRecord | None:
+        with self._conn() as c, c.cursor() as cur:
+            cur.execute(
+                f"SELECT {','.join(_COLUMNS)} FROM runs WHERE run_id = %s",
+                (run_id,),
+            )
+            rows = cur.fetchall()
+        return self._row(rows[0]) if rows else None
+
+    @staticmethod
+    def _row(r: tuple) -> RunRecord:
+        created_at = r[1]
+        # TIMESTAMPTZ comes back as an aware datetime rendered in the *session's*
+        # timezone, so the same instant reads as +08:00 here and +00:00 in CI.
+        # Records are written in UTC, and an audit log whose timestamps depend on
+        # where they were read from is one nobody can line up with a trace.
+        if isinstance(created_at, datetime):
+            created_at = created_at.astimezone(timezone.utc).isoformat()
+
+        return RunRecord(
+            run_id=r[0],
+            created_at=created_at if isinstance(created_at, str) else str(created_at),
+            profile_summary=r[2] or "",
+            status=r[3] or "",
+            decision=r[4] or "",
+            portfolio_r_level=r[5] or "",
+            tokens_used=r[6] or 0,
+            cost_usd=r[7] or 0.0,
+            dashboard_json=r[8] or "{}",
+        )
+
+
 def build_run_store(settings) -> RunStore:
     """Build the RunStore from settings.run_store.
 
     "sqlite"   → SqliteRunStore at settings.run_store_path.
+    "postgres" → PostgresRunStore at settings.run_store_dsn.
     "memory"   → InMemoryRunStore (default).
-    "postgres" → NotImplementedError (reserved).
     """
     backend = getattr(settings, "run_store", "memory")
     if backend == "sqlite":
         path = settings.run_store_path
         return SqliteRunStore(path)
     if backend == "postgres":
-        raise NotImplementedError("Postgres RunStore not yet implemented")
+        return PostgresRunStore(getattr(settings, "run_store_dsn", ""))
     return InMemoryRunStore()

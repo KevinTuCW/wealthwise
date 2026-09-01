@@ -56,51 +56,74 @@ PYTHONPATH=src .venv/bin/python -m wealthwise.langfuse_check
 
 Expected output: `sent wealthwise.langfuse_smoke: wealthwise`
 
-## AkShare Column-Name Calibration
+## AkShare Column-Name Calibration — done, 2026-09-01
 
-The real-data AkShare provider (`src/wealthwise/providers/akshare_provider.py`) contains
-numerous `TODO(live-calibration)` markers.  These mark every place where an AkShare
-DataFrame column name was assumed from documentation and **must be verified against
-actual live output** before production use.
+Every column mapping in `src/wealthwise/providers/akshare_provider.py` has been checked
+against live output from akshare 1.18.83, and the `TODO(live-calibration)` markers are
+gone. This section records what the check found, because three of the mappings were
+wrong in a way that reading the documentation would never have shown: all three returned
+a plausible number.
 
-### Why They Exist
+| endpoint | columns (live) | verdict |
+|---|---|---|
+| `macro_china_lpr` | `TRADE_DATE / LPR1Y / LPR5Y / RATE_1 / RATE_2`, 1575 rows **oldest-first** | mapping was correct; latest print 2026-08-20, LPR1Y = 3.00 |
+| `macro_china_cpi_yearly` | `商品 / 日期 / 今值 / 预测值 / 前值`, oldest-first | column right, **row wrong** — the table ends with the *next scheduled* release, 今值 = NaN, so the snapshot published a NaN CPI between prints |
+| `macro_china_cpi` | `月份 / 全国-当月 / 全国-同比增长 / …`, 223 rows **newest-first** | column right, **order assumed** — reading the last row returned the January **2008** print (7.08%) instead of July 2026 (0.5%) |
+| `currency_boc_sina` | `日期 / 中行汇买价 / 中行钞买价 / 中行钞卖价·汇卖价 / 央行中间价 / 中行折算价`, per **100** units | column and divisor right, **call wrong** — `start_date`/`end_date` default to constants frozen at `20230304`–`20231110`, so a no-argument call quoted a 2023 rate as today's |
 
-AkShare is a community library whose column names change across versions and whose
-documentation can lag behind the actual API.  The sample provider (used in tests and
-offline mode) uses stable synthetic data; the AkShare provider makes best-effort guesses
-for column names like `"收盘"`, `"wind_code"`, `"jjdm"`, etc.
+Fixes: `_newest()` picks the most recent row that actually carries a reading, by date
+rather than by position, which covers both the ordering and the scheduled-NaN cases; the
+FX call passes an explicit recent window; and both macro and FX refuse a print that is
+too old instead of returning it.
 
-### How to Calibrate
+### The freshness guard, and why it costs a CPI publisher
 
-1. Set `USE_REAL_PROVIDERS=true` and ensure `akshare` is installed (`pip install -e '.[data]'`).
-2. Open a Python shell and call the relevant AkShare function directly, e.g.:
+`macro_china_cpi_yearly` is **not currently publishing**: its last real print is
+2025-08-09, a year behind the statistics bureau, and every other jin10-backed series in
+this akshare version (`macro_usa_cpi_monthly`, `macro_china_cpi_monthly`, the euro-area
+tables) stops within days of the same date. The mapping is correct and the source now
+returns nothing.
 
-   ```python
-   import akshare as ak
-   df = ak.stock_zh_a_spot_em()
-   print(df.columns.tolist())  # compare against the expected column names in the provider
-   ```
+That matters more than a missing number, because it is the failure a consensus layer is
+least able to catch. Two publishers a year apart do not look like a disagreement: 0.0%
+from August 2025 and 0.5% from July 2026 are both plausible CPI prints, so the resolver
+reconciles them into a narrow spread and reports high confidence in a figure that
+describes no month at all. With the guard in place CPI falls back to one publisher at
+confidence 0.5 — visibly, in the consensus record.
 
-3. For each `TODO(live-calibration)` marker in `akshare_provider.py`, check the comment,
-   run the corresponding `ak.*` call, and update the column names as needed.
+Live snapshot after calibration:
 
-4. Key files and functions to check:
-   - `AkShareEquityProvider.get_candidates()` — A-share spot tables
-   - `AkShareEquityProvider.get_macro()` — macro indicators (CPI, PMI, GDP)
-   - `AkShareFixedIncomeProvider.get_candidates()` — bond fund / fixed-income lists
-   - `AkShareFixedIncomeProvider.get_macro()` — bond market indicators
-   - `_parse_r_level()` — R-level parsing from fund risk-level fields
+```text
+akshare-lpr        -> {'interest_rate': 0.03}
+akshare-cpi-yearly -> {}                        # stale feed, correctly silent
+akshare-cpi-nbs    -> {'cpi': 0.005}
+USDCNH = 6.7809    HKDCNH = 0.8650              # was 7.1771 / 0.9193 (2023-11-10)
+```
 
-5. After updating column names, re-run the full test and eval suites:
+### What was deleted rather than calibrated
 
-   ```bash
-   make test   # 346+ cases, all offline (unchanged)
-   make eval   # 53 eval cases, hard gates must pass
-   ```
+`AkShareMarketProvider`, `AkShareFundProvider` and the `build_provider` factory are gone.
+They wrapped the eastmoney spot endpoints (`stock_zh_a_spot_em` and its HK/US siblings),
+which are unreachable from here — TLS handshake completes, then the stream is reset — and
+nothing had referenced them since the equity path moved to Tencent. An uncallable code
+path cannot be calibrated, and an uncalibrated fallback is a liability rather than a
+safety net, so the honest close-out was removal, not another `TODO`.
 
-   The eval suites are hermetic and use the sample provider, so they are not affected
-   by AkShare column changes — but any real-data path you add should be smoke-tested
-   manually with live data.
+### Re-verifying
+
+```bash
+PYTHONPATH=src .venv/bin/python -c "
+from wealthwise.providers.akshare_provider import build_macro_sources, AkShareFXProvider
+for s in build_macro_sources(): print(s.name, s.snapshot())
+print(AkShareFXProvider().rate('USDCNH'))"
+
+make test   # 520 offline cases — unaffected by akshare, by design
+make eval   # 64 eval cases, hard gates
+```
+
+The test and eval suites are hermetic and run against the sample provider, so they do not
+cover any of the above. That is the point of this document: the live mappings have no
+automated gate, so they get a dated record instead.
 
 ## Verified Run — 2026-08-10 (real keys)
 
@@ -126,12 +149,12 @@ A keyed end-to-end run was executed via `scripts/verify_real.py` (sample market 
 
 ### AkShare live reachability (from this environment)
 
-- **Reachable & column-verified**: `ak.fund_open_fund_daily_em()` → cols include
-  `基金代码 / 基金简称 / {date}-单位净值 / 日增长率 / 申购状态 / 赎回状态 / 手续费`
-  (matches the provider's `基金代码/基金简称` mapping); `ak.macro_china_lpr()` → cols
-  `TRADE_DATE / LPR1Y / LPR5Y`.
-- **Replaced**: `ak.stock_zh_a_spot_em()` (host `82.push2.eastmoney.com`). The equity path
-  no longer uses it — see below.
+- **Reachable and calibrated**: `macro_china_lpr`, `macro_china_cpi`, `currency_boc_sina`
+  — column by column, above.
+- **Reachable but stopped**: `macro_china_cpi_yearly`, last print 2025-08-09.
+- **Unreachable**: `stock_zh_a_spot_em` and its HK/US siblings (hosts
+  `82.push2.eastmoney.com` / `72.push2.eastmoney.com`). The equity path no longer uses
+  them — see below.
 
 ### Why the equity provider moved off AkShare
 
@@ -172,14 +195,18 @@ regenerated by `scripts/refresh_universe.py`). Keeping the universe in the repo 
 deliberate — fetching the constituent list live would reinstate exactly the kind of network
 dependency this change removed.
 
-`AkShareFundProvider` / `AkShareMacroProvider` / `AkShareFXProvider` are unchanged; their
-endpoints (`fund_open_fund_daily_em`, `macro_china_lpr`, BOC FX) are reachable and verified
-above.
+What is left of `akshare_provider.py` after that move is the macro sources
+(`AkShareLprSource` / `AkShareCpiYearlySource` / `AkShareCpiNbsSource`, consumed through
+`build_macro_sources()`) and `AkShareFXProvider`, all behind the same `_table()` / `_get()`
+seam so tests stub them without importing akshare.
 
-> Note: some function/class names in the calibration section above are indicative; the
-> fund / macro / FX providers use `AkShareFundProvider` / `AkShareMacroProvider` /
-> `AkShareFXProvider` with a `_get` seam + `_map_*` helpers. Equities use
-> `TencentMarketProvider`, same `_get` seam, backed by `data/universe.json`.
+One more live finding from the same session, on the Tencent side rather than AkShare: the
+k-line endpoint needs the venue suffix for US names. `usAAPL` answers with a two-bar stub
+whatever bar count is requested; only `usAAPL.OQ` returns the series. The quote mapper had
+been stripping that suffix, so **every US name in the book was silently getting no
+momentum and no realized volatility** — history is an enrichment, and a name that gets
+none is simply scored on fewer factors. The suffix now survives into
+`metrics["venue_code"]` and the history provider uses it.
 
 ## What "Live Calibration" Does NOT Affect
 

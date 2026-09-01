@@ -139,7 +139,7 @@ DONE   (full trace returned; Langfuse synced if enabled)
 | RAG | In-memory cosine store + local hash embedding; retrieves macro context and compliance/research corpus |
 | Observability | **Langfuse** v4 (optional) + internal trace tree returned with every response |
 | Eval / CI | pytest + multi-suite hard-gate CLI + GitHub Actions |
-| Persistence | run/audit: memory default · sqlite (`RUN_STORE=sqlite`) · Postgres/pgvector reserved |
+| Persistence | run/audit: memory default · sqlite (`RUN_STORE=sqlite`) · **Postgres** (`RUN_STORE=postgres` + `RUN_STORE_DSN`, psycopg 3) |
 | Deployment | Dockerfile + docker-compose (offline out of the box) |
 
 ## Quick Start
@@ -156,7 +156,7 @@ python3 -m venv .venv
 .venv/bin/pip install -e '.[dev,llm]'
 
 # 3. Run tests (offline, hermetic)
-make test           # → 503 passed
+make test           # → 520 passed
 
 # 4. Run eval gate (offline, hard gates)
 make eval           # → 64/64, suitability leaks 0, injection block 100%
@@ -313,7 +313,8 @@ suite is hermetic and never emits to a live Langfuse project.
 | `MAX_FX_EXPOSURE` | Max non-CNY fraction of portfolio (default: `0.5`) |
 | `MAX_LLM_JUDGMENTS` | Hard budget cap on LLM calls per run (default: `12`) |
 | `RISK_BUDGET_METHOD` | Portfolio optimizer method: `risk_parity` (default; other methods reserved → `NotImplementedError` if unset) |
-| `RUN_STORE` | Audit persistence: `memory` (default) or `sqlite` |
+| `RUN_STORE` | Audit persistence: `memory` (default) · `sqlite` (one process) · `postgres` (several) |
+| `RUN_STORE_DSN` | libpq connection string, required when `RUN_STORE=postgres` (also needs `pip install -e '.[pg]'`). **Deliberately has no default** — one would let a misconfigured deployment start up writing its audit log where nobody is reading |
 | `TOKEN_PRICE_PER_1K` | Blended $/1k tokens for cost accounting |
 
 ## Project Structure
@@ -331,33 +332,43 @@ Delivered:
 - [x] Supervisor + 5-expert LangGraph pipeline (goal / macro / equity / portfolio / compliance)
 - [x] Multi-source consensus (pillar 1: Tencent+Sina quotes / LPR + two CPI publishers) + multi-model jury (pillar 2, jury only strictens)
 - [x] Five-factor cross-sectional scoring (value / momentum / low-vol / size / liquidity), `.env`-gated, off by default
+- [x] **Factor-weight backtest** (34 monthly rebalances, [`docs/factor-backtest.md`](docs/factor-backtest.md)) — the composite did **not** beat the size rule it would replace, so the switch stays off
 - [x] Three-layer guardrails (input / process / output) + budget guardrail
 - [x] China investor-suitability (C1–C5) + cross-border FX rules + misleading-language detection
-- [x] A/HK/US market coverage (sample provider + AkShare real-provider skeleton)
+- [x] A/HK/US market coverage (sample provider + live Tencent/Sina dual-source quotes)
+- [x] **AkShare column and freshness calibration** (LPR / two CPI publishers / BOC FX, checked column by column against live output — [`docs/real-data-verification.md`](docs/real-data-verification.md))
 - [x] RAG macro context + compliance/research corpus (in-memory, local hash embedding)
 - [x] Langfuse full-trace observability (optional, offline-safe)
-- [x] SSE workbench + run audit store (memory / sqlite)
+- [x] SSE workbench + run audit store
 - [x] Multi-suite eval gate with hard gates (64 cases, incl. end-to-end status_routing)
 - [x] Docker + docker-compose + CI (GitHub Actions)
-- [x] Persistence (RunStore: memory + sqlite, Postgres reserved)
+- [x] Persistence (RunStore: memory + sqlite + **Postgres**, one append-only contract across all three)
 
 Known gaps and future work:
 
-- **AkShare column-name calibration** — every column assumption in
-  `src/wealthwise/providers/akshare_provider.py` is marked `TODO(live-calibration)`.
-  Verified via the keyed path: funds (`fund_open_fund_daily_em`) and macro
-  (`macro_china_lpr`) are reachable with confirmed columns; A-share spot
-  (`stock_zh_a_spot_em`) was SSL-blocked at its host from the verification network
-  (an environment limitation). See [`docs/real-data-verification.md`](docs/real-data-verification.md).
+- **CPI is down to one publisher** — the aggregator table `macro_china_cpi_yearly` has
+  **stopped publishing** in this akshare version (last print 2025-08-09, as have all the
+  other jin10-backed series); the statistics-bureau table is current. The mapping is right
+  and the freshness guard drops the stale one, so CPI falls back to a single publisher at
+  confidence 0.5 — honest, but pillar one is on one leg for that reading. What is needed
+  is a second publisher that is genuinely independent *and* current, not another column of
+  the same table.
 - **Debate / hierarchical multi-agent** — the current jury is a flat majority vote;
   a structured debate loop (Supervisor mediates expert disagreements) is future work.
-- **Postgres run store** — schema is reserved in `store.py`; only `memory` and
-  `sqlite` backends are implemented.
-- **Real covariance data** — the portfolio optimizer uses toy risk estimates from the
-  sample provider. Real mean-variance / Black-Litterman requires a proper covariance
-  matrix from live price history.
+- **Real covariance data** — per-name volatility is real now (realized vol from Tencent
+  daily bars, measured 0.18–1.05); **correlation is not**, the optimizer still uses the
+  `ASSUMED_CROSS_CORR = 0.3` constant. Real mean-variance / Black-Litterman needs the full
+  matrix.
+- **Changing the factor weights needs dates this backtest has not seen** — momentum's rank
+  IC is negative in all three markets and its 25% is the least defensible number in the
+  dict, but "drop the factor that did worst in this sample" and "pick factors on this
+  sample" are the same sentence. Sector neutralisation is also unwired: spot quotes carry
+  no sector field, and a live factor ranking comes back almost entirely banks.
+- **No turnover for HK** — the Tencent quote returns 0 in that field, so the liquidity
+  factor is missing for the whole HK sleeve (coverage renormalisation absorbs it, but that
+  slice really is scored on four factors).
 - **Paid data sources** — quantitative data vendors for Chinese markets (e.g. Wind, iFinD)
-  are not integrated; the AkShare provider covers public data only.
+  are not integrated; the key-free sources cover public data only.
 
 ## License
 

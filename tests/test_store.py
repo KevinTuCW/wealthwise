@@ -8,11 +8,15 @@ import pytest
 
 from wealthwise.store import (
     InMemoryRunStore,
+    PostgresRunStore,
     RunRecord,
     RunStore,
     SqliteRunStore,
     build_run_store,
 )
+
+#: Postgres integration tests run only against a database the operator supplies.
+PG_DSN = os.environ.get("WEALTHWISE_TEST_PG_DSN", "")
 
 
 # ---------------------------------------------------------------------------
@@ -174,9 +178,10 @@ class TestSqliteRunStore:
 
 class TestBuildRunStore:
     class _Settings:
-        def __init__(self, backend: str, path: str = ":memory:"):
+        def __init__(self, backend: str, path: str = ":memory:", dsn: str = ""):
             self.run_store = backend
             self.run_store_path = path
+            self.run_store_dsn = dsn
 
     def test_memory_backend(self):
         settings = self._Settings("memory")
@@ -188,13 +193,79 @@ class TestBuildRunStore:
         store = build_run_store(settings)
         assert isinstance(store, SqliteRunStore)
 
-    def test_postgres_raises(self):
+    def test_postgres_without_dsn_fails_loudly(self):
+        """Refuse to start rather than write the audit log somewhere unread."""
         settings = self._Settings("postgres")
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(ValueError, match="RUN_STORE_DSN"):
             build_run_store(settings)
+
+    @pytest.mark.skipif(not PG_DSN, reason="set WEALTHWISE_TEST_PG_DSN to run")
+    def test_postgres_backend(self):
+        settings = self._Settings("postgres", dsn=PG_DSN)
+        assert isinstance(build_run_store(settings), PostgresRunStore)
 
     def test_default_is_memory(self):
         class MinimalSettings:
             pass
         store = build_run_store(MinimalSettings())
         assert isinstance(store, InMemoryRunStore)
+
+
+# ---------------------------------------------------------------------------
+# PostgresRunStore — integration, skipped unless a test database is supplied
+#
+# Gated on an env var rather than faked in-process: a fake would test the fake,
+# and the reason this backend exists at all is how a real Postgres behaves with
+# more than one writer.
+#
+#   createdb wealthwise
+#   WEALTHWISE_TEST_PG_DSN=postgresql:///wealthwise pytest tests/test_store.py
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not PG_DSN, reason="set WEALTHWISE_TEST_PG_DSN to run")
+class TestPostgresRunStore:
+    @pytest.fixture
+    def store(self):
+        import psycopg
+
+        s = PostgresRunStore(PG_DSN)
+        with psycopg.connect(PG_DSN) as c, c.cursor() as cur:
+            cur.execute("TRUNCATE runs")      # append-only log, per-test clean slate
+        return s
+
+    def test_save_then_get_round_trips_every_field(self, store):
+        record = _make_record()
+        run_id = store.save(record)
+        got = store.get(run_id)
+        assert got is not None
+        assert got.model_dump() == record.model_dump()
+
+    def test_get_unknown_run_id_returns_none(self, store):
+        assert store.get("no-such-run") is None
+
+    def test_list_is_newest_first_and_honours_limit(self, store):
+        import datetime
+
+        base = datetime.datetime(2026, 9, 1, tzinfo=datetime.timezone.utc)
+        for i in range(5):
+            store.save(_make_record(
+                created_at=(base + datetime.timedelta(minutes=i)).isoformat(),
+                profile_summary=f"run-{i}",
+            ))
+        got = store.list(limit=3)
+        assert [r.profile_summary for r in got] == ["run-4", "run-3", "run-2"]
+
+    def test_dashboard_json_is_stored_byte_for_byte(self, store):
+        """An audit record tidied on the way in is no longer evidence."""
+        raw = '{"b": 1, "a": [2,  3], "spaced": "  keep  "}'
+        run_id = store.save(_make_record(dashboard_json=raw))
+        assert store.get(run_id).dashboard_json == raw
+
+    def test_survives_a_new_connection(self, store):
+        """Durability is the whole point: a second store must see the record."""
+        run_id = store.save(_make_record(profile_summary="C4 | 1,000,000 CNY | 8y"))
+        assert PostgresRunStore(PG_DSN).get(run_id).profile_summary == \
+            "C4 | 1,000,000 CNY | 8y"
+
+    def test_satisfies_the_run_store_protocol(self, store):
+        assert isinstance(store, RunStore)

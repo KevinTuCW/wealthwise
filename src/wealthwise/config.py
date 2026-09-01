@@ -79,8 +79,12 @@ class Settings(BaseSettings):
     token_price_per_1k: float = 0.0002      # blended $/1k tokens (set to contract price)
 
     # --- persistence ---
-    run_store: str = "memory"               # "memory" | "sqlite" — run/audit persistence
+    run_store: str = "memory"       # "memory" | "sqlite" | "postgres" — run/audit store
     run_store_path: str = "data/runs.db"    # SQLite file path (used when run_store="sqlite")
+    # libpq connection string, used when run_store="postgres". Deliberately has
+    # no default: one pointing at localhost would let a misconfigured deployment
+    # start up happily and write its audit log where nobody is reading.
+    run_store_dsn: str = ""
 
     @property
     def tracing_enabled(self) -> bool:

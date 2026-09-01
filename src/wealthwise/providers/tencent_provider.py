@@ -141,6 +141,13 @@ def _map_quote_row(fields: list[str], market: str,
         return None
 
     metrics: dict = {}
+    # …and keep the suffix too. The k-line endpoint on the same host insists on
+    # it: `usAAPL` returns two bars whatever bar count is asked for, `usAAPL.OQ`
+    # returns the series. Dropping it here left every US name in the book with
+    # no momentum and no realized volatility, silently, because history is an
+    # enrichment and a name that gets none is simply scored on fewer factors.
+    if market == "US" and "." in code:
+        metrics["venue_code"] = code
     pe = _to_float(fields[_F_PE])
     if pe is not None:
         metrics["pe"] = pe
