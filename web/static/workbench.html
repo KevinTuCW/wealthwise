@@ -619,8 +619,21 @@
       </div>
       <div class="field">
         <label for="goals">投资目标</label>
-        <input id="goals" name="goals" value="balanced_growth" placeholder="逗号分隔">
-        <span class="hint">retirement / balanced_growth …</span>
+        <select id="goals" name="goals">
+          <optgroup label="进取 · 权益上限更高">
+            <option value="balanced_growth" selected>稳健增值</option>
+            <option value="retirement">养老储备</option>
+            <option value="growth">资产增长</option>
+            <option value="education">教育金</option>
+            <option value="wealth_appreciation">财富传承</option>
+          </optgroup>
+          <optgroup label="保守 · 权益上限更低">
+            <option value="capital_preservation">保本优先</option>
+            <option value="income">稳定现金流</option>
+            <option value="liquidity">流动性优先</option>
+          </optgroup>
+        </select>
+        <span class="hint">与风险等级各出一条权益上限，取更紧的那条</span>
       </div>
       <div class="field">
         <label for="liquidity_min">最低流动性</label>
