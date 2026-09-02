@@ -777,6 +777,9 @@ const TERMS = {
   budget: "<b>调用预算</b>单次咨询允许的模型调用次数上限。超过就直接终止，防止反思循环跑飞把账单烧穿。",
   token: "<b>Token</b>模型处理文本的计费单位。离线模式下没有真实调用，所以是 0，不是「免费」。",
   tilt: "<b>宏观倾向</b>对权益类资产的整体态度：超配（看多）、中性、低配（看空）。它影响筛选的松紧，不直接决定买哪只。",
+  equity_band: "<b>权益区间</b>本方案允许配置多少权益（股票类）。它由两条独立的限制取<b>更紧的那一条</b>：你的风险等级允许你承担多少，以及你的目标和期限实际需要多少。看「上限来自」就知道是哪一条在起作用。",
+  cap_risk: "<b>受风险等级限制</b>这次是你的风险测评等级卡住了上限——想配更多权益，得先有更高的风险承受能力，而不是改目标。",
+  cap_goal: "<b>受目标限制</b>这次是投资目标和期限卡住了上限。风险等级还有余量，但这个目标不需要配更多权益：<b>能承受</b>不等于<b>该承受</b>。",
   guard: "<b>护栏</b>流水线里的确定性检查，分输入、过程、输出三层。它们不参与判断好坏，只负责拦住不该通过的东西。",
 };
 
@@ -1176,7 +1179,22 @@ function renderExperts(experts) {
   const co = experts.compliance || {};
   const isFactor = eq.ranking?.method === "factor";
 
+  const goal = experts.goal || {};
+  const capSrc = goal.equity_cap_source;
+  const capNote = capSrc === "risk"
+    ? `<span class="pill pill-warn">${T("受风险等级限制", "cap_risk")}</span>`
+    : capSrc === "goal"
+      ? `<span class="pill pill-navy">${T("受目标限制", "cap_goal")}</span>` : "";
+
   byId("experts-body").innerHTML = `<div class="cards">
+    <div class="card"><h4>目标规划<span class="role">GOAL</span></h4>
+      ${kv(T("权益区间", "equity_band"),
+           `${pct(goal.min_equity, 0)} – ${pct(goal.max_equity, 0)}`)}
+      ${kv("上限来自", capNote || "—")}
+      ${kv("风险等级允许", pct(goal.risk_equity_cap, 0))}
+      ${kv("目标需要", pct(goal.goal_equity_cap, 0))}
+      ${kv(T("产品上限", "r_level"), esc(goal.risk_ceiling || "—"))}
+    </div>
     <div class="card"><h4>宏观研究<span class="role">MACRO</span></h4>
       ${kv(T("倾向", "tilt"), esc(TILT_LABEL[macro.tilt] || macro.tilt || "—"))}
       ${kv(T("置信度", "confidence"), pct(macro.confidence, 0))}

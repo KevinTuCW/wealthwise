@@ -66,6 +66,22 @@ def _build_allocation_panel(state: AdvisoryState) -> dict:
 
 def _build_experts_panel(state: AdvisoryState) -> dict:
     """Panel 2: each expert's contribution pulled from state fields."""
+    # Goal planning. Surfaced because "why is my C5 book only 65% equity" has two
+    # different answers — the risk rating or the mandate — and until the binding
+    # limit was reported, neither the investor nor the reviewer could tell which
+    # one they were looking at.
+    gc = state.goal_constraints or {}
+    goal_summary = {
+        "risk_ceiling": gc.get("risk_ceiling", ""),
+        "min_equity": gc.get("min_equity"),
+        "max_equity": gc.get("max_equity"),
+        "goal_equity_cap": gc.get("goal_equity_cap"),
+        "risk_equity_cap": gc.get("risk_equity_cap"),
+        "equity_cap_source": gc.get("equity_cap_source", ""),
+        "goal_bucket": gc.get("goal_bucket", ""),
+        "horizon_bucket": gc.get("horizon_bucket", ""),
+    }
+
     # Macro
     macro = state.macro_view
     macro_summary = {
@@ -136,6 +152,7 @@ def _build_experts_panel(state: AdvisoryState) -> dict:
             "top_candidates": fi_top,
         },
         "portfolio_construction": port_summary,
+        "goal": goal_summary,
         "compliance": comp_summary,
         "node_latencies": node_latencies,
     }

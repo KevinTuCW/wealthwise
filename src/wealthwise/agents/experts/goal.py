@@ -1,7 +1,20 @@
 """goal_node — derive goal_constraints from investor profile (rule-based, no LLM).
 
-Maps C-level → risk_ceiling, goals + horizon → equity cap + target return band,
-and carries liquidity_min and accept_cross_border through as constraint floors.
+Two independent limits on how much equity the book may hold, and the tighter
+one wins:
+
+* **risk tolerance** (C1–C5) — how much the investor may take on
+* **goal + horizon** — how much the mandate actually calls for
+
+Plus `risk_ceiling` (C→R), which is a different instrument: it filters *which
+securities* are eligible, not *how much* equity there is.
+
+That distinction is the bug this file used to have. The equity cap was keyed on
+goal and horizon alone, and risk tolerance reached the pipeline only as the R
+ceiling — so a C5 and a C3 with the same goal received the same 35% equity in
+different tickers, and raising the risk rating changed nothing an investor would
+recognise as risk. Suitability was enforcing "may not exceed" while never asking
+"does this match".
 
 All logic is deterministic: no LLM call, no external data needed.
 """
@@ -35,7 +48,13 @@ _C_TO_R: dict[str, str] = {
 #   mid            → 0.35
 #   short          → 0.20
 
-_AGGRESSIVE_GOALS = frozenset({"retirement", "growth", "education", "wealth_appreciation"})
+# `balanced_growth` belongs here despite its name, and its absence was a live
+# bug: it is the workbench's own default goal, so every default demo run was
+# silently planned as capital preservation. "Balanced" describes the resulting
+# mix — which is exactly what the cap below is for — not the mandate.
+_AGGRESSIVE_GOALS = frozenset({
+    "retirement", "growth", "education", "wealth_appreciation", "balanced_growth",
+})
 
 _EQUITY_CAPS: dict[tuple[str, str], float] = {
     ("aggressive", "long"):  0.80,
@@ -61,6 +80,38 @@ _EQUITY_FLOORS: dict[tuple[str, str], float] = {
     ("conservative", "long"):  0.30,
     ("conservative", "mid"):   0.20,
     ("conservative", "short"): 0.05,
+}
+
+# ---------------------------------------------------------------------------
+# Equity cap by risk tolerance — the limit the C rating is actually for
+# ---------------------------------------------------------------------------
+# A house view, not a calibrated number, and deliberately shaped like the C→R
+# ladder it sits beside: each step up buys roughly another fifth of the book in
+# equity. C5 stops at 0.85 because the liquidity floor has to live somewhere.
+#
+# This is a *cap*, never a floor. Tolerance is permission, not instruction: a C5
+# saving for a two-year goal does not get a growth book because he could stomach
+# one. That is what keeps the goal table below meaningful.
+#
+# C1 is 0.10 rather than 0.00, and the difference is not cosmetic. Zero looked
+# like the honest reading of 保守型 — and it silently disarmed a security gate.
+# A C1 book is already all cash without any help from this table, because the R1
+# ceiling admits no equity; setting the cap to zero adds nothing to that, and it
+# means an *unauthorised* instrument that does clear the ceiling (the
+# cross-border leak the status_routing suite injects) gets zero weight, drops
+# out of the portfolio, and is never seen by the compliance node. The violation
+# stops being rejected and starts being invisible.
+#
+# This repo has made that exact mistake once before, from the other direction:
+# dropping wrong-market names during screening produced a cleaner portfolio and
+# no detection. Same lesson, second sighting — **a filter that removes evidence
+# is not a control.** Refusal has to happen where it can be recorded.
+_RISK_EQUITY_CAPS: dict[str, float] = {
+    "C1": 0.10,
+    "C2": 0.20,
+    "C3": 0.40,
+    "C4": 0.65,
+    "C5": 0.85,
 }
 
 # Target return bands  (low, high) as approximate annualized targets
@@ -118,15 +169,29 @@ def goal_node(state: AdvisoryState, deps) -> dict:
     h_bucket = _horizon_bucket(profile.horizon_years)
 
     key = (g_bucket, h_bucket)
-    max_equity = _EQUITY_CAPS[key]
-    # The floor must never fight the investor's own liquidity requirement.
-    min_equity = min(_EQUITY_FLOORS[key], max(0.0, 1.0 - profile.liquidity_min))
+    goal_cap = _EQUITY_CAPS[key]
+    risk_cap = _RISK_EQUITY_CAPS[profile.risk_level]
+    max_equity = min(goal_cap, risk_cap)
+
+    # Which limit bound, recorded rather than inferred. A cap nobody can
+    # attribute is a cap nobody can argue with — and "why is my C5 book only 35%
+    # equity" has two completely different answers depending on this field.
+    equity_cap_source = "goal" if goal_cap <= risk_cap else "risk"
+
+    # The floor must clear neither the cap above it nor the investor's own
+    # liquidity requirement; an inverted band would leave the optimiser to
+    # violate one of the two without saying which.
+    min_equity = min(_EQUITY_FLOORS[key], max_equity,
+                     max(0.0, 1.0 - profile.liquidity_min))
     return_band = _RETURN_BANDS[key]
 
     goal_constraints = {
         "risk_ceiling": risk_ceiling,
         "max_equity": max_equity,
         "min_equity": min_equity,
+        "goal_equity_cap": goal_cap,
+        "risk_equity_cap": risk_cap,
+        "equity_cap_source": equity_cap_source,
         "target_return_low": return_band[0],
         "target_return_high": return_band[1],
         "liquidity_min": profile.liquidity_min,
@@ -141,6 +206,7 @@ def goal_node(state: AdvisoryState, deps) -> dict:
         "risk_ceiling": risk_ceiling,
         "max_equity": max_equity,
         "min_equity": min_equity,
+        "equity_cap_source": equity_cap_source,
         "goal_bucket": g_bucket,
         "horizon_bucket": h_bucket,
     }
@@ -148,7 +214,7 @@ def goal_node(state: AdvisoryState, deps) -> dict:
         f"goal_node: {profile.risk_level}→{risk_ceiling} ceiling; "
         f"goals={profile.goals} ({g_bucket}); "
         f"horizon={profile.horizon_years}y ({h_bucket}); "
-        f"equity={min_equity:.0%}–{max_equity:.0%}; "
+        f"equity={min_equity:.0%}–{max_equity:.0%} (capped by {equity_cap_source}); "
         f"liquidity_min={profile.liquidity_min:.0%}"
     )
 

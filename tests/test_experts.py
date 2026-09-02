@@ -138,6 +138,71 @@ class TestGoalNode:
         short_result = goal_node(state_short, deps)
         assert long_result["goal_constraints"]["max_equity"] >= short_result["goal_constraints"]["max_equity"]
 
+    # ------------------------------------------------------------------
+    # Risk tolerance has to reach the asset mix, not just the instrument filter
+    # ------------------------------------------------------------------
+
+    def _constraints(self, deps, risk_level, goals=("retirement",), horizon=5,
+                     liquidity=0.1):
+        from wealthwise.agents.experts.goal import goal_node
+        state = AdvisoryState(profile=InvestorProfile(
+            risk_level=risk_level, investable=500_000, horizon_years=horizon,
+            goals=list(goals), liquidity_min=liquidity, accept_cross_border=True))
+        return goal_node(state, deps)["goal_constraints"]
+
+    def test_risk_level_moves_the_equity_cap(self, deps):
+        """The whole point of a C rating is how much risk the investor may take.
+
+        Before this, C1–C5 differed only in `risk_ceiling` — which filters which
+        instruments are eligible — so a C5 and a C3 with the same goal received
+        the same 35% equity, in different tickers.
+        """
+        caps = [self._constraints(deps, c)["max_equity"] for c in
+                ("C1", "C2", "C3", "C4", "C5")]
+        assert caps == sorted(caps), f"equity cap must not fall as risk rises: {caps}"
+        assert caps[4] > caps[2], "C5 must be allowed more equity than C3"
+
+    def test_c1_cap_stays_above_zero_so_violations_stay_visible(self, deps):
+        """A zero cap would disarm the cross-border gate rather than tighten it.
+
+        C1 books are all cash anyway — the R1 ceiling admits no equity. But a cap
+        of zero also gives an *unauthorised* instrument zero weight, so it drops
+        out of the portfolio before the compliance node can reject it, turning a
+        REJECT into a silent PASS. The status_routing hard gate catches this;
+        the assertion is here so the next person meets it in a unit test first.
+        """
+        assert self._constraints(deps, "C1")["max_equity"] > 0.0
+
+    def test_goal_still_binds_when_it_is_tighter(self, deps):
+        """Tolerance is permission, not instruction: a C5 saving for two years
+        does not get a growth book because he could stomach one."""
+        c5_short = self._constraints(deps, "C5", goals=["capital_preservation"], horizon=2)
+        assert c5_short["max_equity"] <= 0.20
+
+    def test_floor_never_exceeds_cap(self, deps):
+        """An impossible band would leave the optimiser to break one silently."""
+        for c in ("C1", "C2", "C3", "C4", "C5"):
+            for goals in (["retirement"], ["capital_preservation"], ["balanced_growth"]):
+                for horizon in (2, 5, 10):
+                    for liquidity in (0.0, 0.2, 0.9):
+                        gc = self._constraints(deps, c, goals, horizon, liquidity)
+                        assert gc["min_equity"] <= gc["max_equity"], (c, goals, horizon, liquidity)
+
+    def test_balanced_growth_is_a_growth_mandate(self, deps):
+        """`balanced_growth` is the workbench's own default goal, and it was
+        falling through to the conservative bucket — so the demo profile was
+        being planned as capital preservation without saying so."""
+        from wealthwise.agents.experts.goal import _goal_bucket
+
+        assert _goal_bucket(["balanced_growth"]) == "aggressive"
+
+    def test_constraints_say_which_limit_bound(self, deps):
+        """A cap nobody can attribute is a cap nobody can argue with."""
+        risk_bound = self._constraints(deps, "C2", goals=["retirement"], horizon=10)
+        goal_bound = self._constraints(deps, "C5", goals=["capital_preservation"], horizon=2)
+        assert risk_bound["equity_cap_source"] == "risk"
+        assert goal_bound["equity_cap_source"] == "goal"
+
     def test_liquidity_min_propagated(self, deps):
         from wealthwise.agents.experts.goal import goal_node
         state = _base_state()
