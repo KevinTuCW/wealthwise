@@ -108,6 +108,44 @@ class TestBuildSampleDeps:
                 f"Returned label {verdict.label!r} not in {labels}"
             )
 
+    def test_offline_tilt_reads_the_equity_view_not_a_sibling_class(self):
+        """The tilt must come from the equity view, not whichever class is listed first.
+
+        A bare substring scan for the label words read `cash: underweight` and
+        reported it as the equity tilt. Every offline run got the same wrong
+        answer, and because the snapshot is fixed it was a constant rather than
+        an intermittent fault.
+        """
+        from wealthwise.bootstrap import OfflineJuryClient
+
+        labels = ["overweight", "neutral", "underweight"]
+        snapshot = (
+            "Macro snapshot: {'asset_class_view': {'equity': 'neutral', "
+            "'bond': 'overweight', 'cash': 'underweight'}, "
+            "'market_view': {'HK': 'slight_overweight'}}"
+        )
+        assert OfflineJuryClient("t").judge("sys", snapshot, labels).label == "neutral"
+
+        bearish = snapshot.replace("'equity': 'neutral'", "'equity': 'underweight'")
+        assert OfflineJuryClient("t").judge("sys", bearish, labels).label == "underweight"
+
+        bullish = snapshot.replace("'equity': 'neutral'", "'equity': 'overweight'")
+        assert OfflineJuryClient("t").judge("sys", bullish, labels).label == "overweight"
+
+    def test_offline_tilt_matches_the_sample_snapshot(self):
+        """End to end: the offline tilt agrees with what the sample data publishes."""
+        from wealthwise.bootstrap import build_sample_deps
+        from wealthwise.agents.experts.macro import macro_node
+        from wealthwise.agents.state import AdvisoryState, InvestorProfile
+
+        deps = build_sample_deps()
+        state = AdvisoryState(profile=InvestorProfile(
+            risk_level="C4", investable=800_000, horizon_years=10,
+            goals=["retirement"], liquidity_min=0.15, accept_cross_border=True,
+        ))
+        tilt = macro_node(state, deps)["macro_view"]["tilt"]
+        assert tilt == deps.macro.snapshot()["asset_class_view"]["equity"]
+
 
 class TestBuildRuntimeDeps:
     def test_fallback_to_sample_when_use_real_providers_false(self):

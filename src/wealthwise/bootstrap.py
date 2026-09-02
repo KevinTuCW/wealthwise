@@ -9,6 +9,8 @@ build_runtime_deps: real providers when use_real_providers=True + keys present;
 """
 from __future__ import annotations
 
+import re
+
 from wealthwise.config import Settings, get_settings
 from wealthwise.agents.deps import AdvisoryDeps
 from wealthwise.llm import Verdict
@@ -20,6 +22,14 @@ from wealthwise.providers.consensus_provider import (
 from wealthwise.providers.sample import SampleFXProvider, SampleMacroProvider, SampleMarketProvider
 from wealthwise.rag.corpus import load_policy_retriever, load_research_retriever
 from wealthwise.rag.embed import LocalHashingEmbedder
+
+
+# The equity view as it appears in a snapshot rendered into the prompt, under
+# either dict-repr or JSON quoting. Matching the field is what keeps the offline
+# tilt tied to the asset class actually being asked about.
+_EQUITY_VIEW_RE = re.compile(
+    r"""["']equity["']\s*:\s*["'](overweight|neutral|underweight)["']"""
+)
 
 
 def _evidence(user: str, labels: list[str]) -> str:
@@ -97,11 +107,26 @@ class OfflineJuryClient:
                 label = "PASS"
 
         elif labels == ["overweight", "neutral", "underweight"]:
-            # Macro tilt judgment — same evidence-only scoping as compliance
+            # Macro tilt judgment — same evidence-only scoping as compliance.
+            #
+            # Anchored on the equity field rather than scanned for bare label
+            # words. The snapshot publishes a view per asset class, so a
+            # substring scan returns whichever class is listed first: it was
+            # reading `cash: underweight` and reporting it as the *equity* tilt
+            # on every offline run, while the same snapshot said
+            # `equity: neutral`. Because the snapshot is fixed, that made the
+            # offline tilt a constant, and the constant happened to be the one
+            # value with a downstream effect (it sets equity_node's PE cap) —
+            # so every test, demo and eval case exercised that branch and only
+            # that branch. `market_view` carries `slight_overweight` too, which
+            # the same scan would have read as a bullish equity call.
             combined = _evidence(user, labels).lower()
-            if "underweight" in combined or "bear" in combined or "recession" in combined:
+            view = _EQUITY_VIEW_RE.search(combined)
+            if view:
+                label = view.group(1)
+            elif "bear" in combined or "recession" in combined:
                 label = "underweight"
-            elif "overweight" in combined or "bull" in combined:
+            elif "bull" in combined:
                 label = "overweight"
             else:
                 label = "neutral"
