@@ -16,9 +16,12 @@ This module closes that gap deterministically, with no model in the loop:
 3. Round each survivor down to whole lots. The rounding residual goes to cash,
    never to an unplanned overweight.
 
-The *realised* weights this produces are what the rest of the pipeline should
-see. Compliance validating a portfolio that differs from the one handed to the
-investor would approve one thing and issue another.
+This runs *after* compliance has ruled, not before. Handing the gate the rounded
+result reads as the more auditable order and is the opposite: an unauthorised
+holding small enough to be rounded away would leave a clean book behind, and the
+verdict would be PASS on a portfolio that should have been rejected. Rounding
+must not be able to launder a violation. Compliance judges the recommendation;
+this implements the recommendation it approved.
 """
 from __future__ import annotations
 
@@ -227,8 +230,11 @@ def realised_allocation(portfolio: PortfolioAllocation,
                         plan: ExecutionPlan) -> PortfolioAllocation:
     """Rebuild the allocation from what the plan actually buys.
 
-    Compliance runs on this, not on the pre-rounding target: approving weights
-    the investor will never hold is an audit gap, not a rounding detail.
+    This is reporting, not a second gate. Compliance rules on the *pre-rounding*
+    target and the plan is built afterwards, because a holding small enough to be
+    rounded away would otherwise leave a clean book behind — rounding must not be
+    able to launder a violation. So this describes what the investor ends up
+    holding; the approved recommendation is `portfolio`.
     """
     if not plan.positions:
         return portfolio
