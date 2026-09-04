@@ -30,11 +30,11 @@
 
 WealthWise 是一条个人资产配置投顾流水线。给它一份投资者画像（风险等级 C1–C5、目标、期限、是否接受跨境），它会经过一条 Supervisor + 5 专家的 LangGraph 流水线，产出一份带适当性裁决与完整披露的资产配置方案。默认运行时**完全离线、确定性**——无需 key、无需网络。设 `USE_REAL_PROVIDERS=true` 即接入 GLM + DeepSeek-V3 陪审、腾讯+新浪双源实时行情与 AkShare 宏观/汇率。
 
-<p align="center">
-  <a href="docs/img/wealthwise-workbench.webp"><img src="docs/img/wealthwise-workbench-top.webp" alt="WealthWise 投顾工作台首屏：左栏投资者画像输入，右侧是适当性匹配裁决、资产配置饼图与方案说明、以及执行清单的开头几行" width="900"></a>
-</p>
-
-<p align="center"><a href="docs/img/wealthwise-workbench.webp"><b>🔍 点击查看完整长截图</b></a></p>
+<details>
+<summary><div align="center"><b>👇 点击图片可展开／收起完整长截图</b></div>
+<img src="docs/img/wealthwise-workbench-top.webp" alt="WealthWise 投顾工作台首屏：左栏投资者画像输入，右侧是适当性匹配裁决、资产配置饼图与方案说明、以及执行清单的开头几行" width="900"></summary>
+<img src="docs/img/wealthwise-workbench-rest.webp" alt="WealthWise 投顾工作台续图：24 行执行清单、C1–C5 合规审查矩阵与多模型交叉验证、五个专家的贡献、token 用量与各节点耗时" width="900">
+</details>
 
 <p align="center"><sub><b>投顾工作台的一次完整出具（C4 · 10 万 · 1 年）</b> —— 上半是适当性裁决与资产配置；往下是 24 行执行清单、C1–C5 适当性矩阵、三模型交叉验证、五个专家各自的产出，以及这次跑了多少 token、每个节点花了多久。</sub></p>
 
